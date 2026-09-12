@@ -30,6 +30,7 @@ git clone https://github.com/corzyy/dotfiles.git ~/Documents/dotfiles
    if `[cachyos]` is already in `/etc/pacman.conf`. Skip manually with `--no-cachyos`.
 1. **Packages** (`packages.conf`) — `pacman` for official repos, `paru` for AUR.
    Unknown-to-pacman entries (e.g. `mangowm` on vanilla Arch) auto-fall-back to `paru`.
+   Always includes `mangowm` + `sddm`.
 2. **Configs** — copies `.config/*` from the repo root to `~/.config`
    (existing dirs are backed up to `~/.config_backup_<date>`, `wallpapers` excluded).
 3. **Wallpapers** — copies `wallpapers/` to your Pictures folder, resolved via
@@ -39,6 +40,8 @@ git clone https://github.com/corzyy/dotfiles.git ~/Documents/dotfiles
 4. **jhqs** — clones/updates `https://github.com/corzyy/jhqs.git` to
    `~/.config/quickshell/jhqs`, makes `scripts/*.sh` executable and creates
    `~/.local/bin/jhqs -> /usr/bin/quickshell` (expected by mango autostart).
+5. **SDDM** — `sudo systemctl enable sddm.service -f` + `sudo systemctl start sddm.service`
+   (skipped if already running). Then prompts to reboot to finish the installation.
 
 ## Add programs later (dynamic)
 
@@ -66,9 +69,12 @@ Then re-run `./install.sh --only-packages -y`.
 | Flag | Effect |
 |---|---|
 | `--dry-run` | print actions, change nothing |
-| `--only-cachyos` / `--only-packages` / `--only-configs` / `--only-wallpapers` / `--only-jhqs` | run one step |
+| `--only-cachyos` / `--only-packages` / `--only-configs` / `--only-wallpapers` / `--only-jhqs` / `--only-sddm` | run one step |
 | `--no-cachyos` | skip CachyOS repo setup |
 | `--no-packages` | skip package install |
+| `--no-sddm` | skip SDDM enable/start |
+| `--no-reboot` | skip reboot prompt at the end |
+| `--reboot` | reboot automatically at the end (no prompt) |
 | `--no-backup` | overwrite without backup |
 | `--link` | symlink `~/.config/*` to repo instead of copying (default `--copy`) |
 | `-y` / `--yes` | skip confirm prompt |

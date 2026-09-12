@@ -5,11 +5,12 @@
 #
 # What it does:
 #   0. Ensures CachyOS repos are enabled (official cachyos-repo.sh, skipped if present)
-#   1. Installs packages from packages.conf (pacman + paru for AUR)
+#   1. Installs packages from packages.conf (pacman + paru for AUR, incl. mangowm + sddm)
 #   2. Copies .config/* from this repo to ~/.config (with backup, skips wallpapers)
 #   3. Copies wallpapers/ to "$(xdg-user-dir PICTURES)/wallpapers" (language-independent,
 #      works for Pictures/Bilder/whatever xdg says)
 #   4. Clones/updates jhqs quickshell config to ~/.config/quickshell/jhqs
+#   5. Enables + starts SDDM (systemd), then prompts to reboot to finish
 #
 # Usage:
 #   ./install.sh [options]
@@ -20,7 +21,11 @@
 #   ./install.sh --only-configs   # only step 2
 #   ./install.sh --only-wallpapers
 #   ./install.sh --only-jhqs
+#   ./install.sh --only-sddm      # only enable/start SDDM
 #   ./install.sh --no-cachyos     # skip CachyOS repo setup
+#   ./install.sh --no-sddm        # skip SDDM enable/start
+#   ./install.sh --no-reboot      # skip reboot prompt at the end
+#   ./install.sh --reboot         # reboot automatically at the end (no prompt)
 #   ./install.sh --no-backup      # skip backups (not recommended)
 #   ./install.sh --link           # symlink instead of copy (default is --copy)
 
@@ -42,8 +47,11 @@ DO_PACKAGES=true
 DO_CONFIGS=true
 DO_WALLPAPERS=true
 DO_JHQS=true
+DO_SDDM=true
 DO_BACKUP=true
 LINK_MODE=false
+AUTO_REBOOT=false
+NO_REBOOT=false
 
 # --- colors (disabled when not a tty) ---
 if [[ -t 1 ]]; then
@@ -68,8 +76,12 @@ usage() {
   echo "  --only-configs       only copy .config files"
   echo "  --only-wallpapers    only install wallpapers"
   echo "  --only-jhqs          only clone/update jhqs"
+  echo "  --only-sddm          only enable/start SDDM"
   echo "  --no-cachyos         skip CachyOS repo setup"
   echo "  --no-packages        skip package install"
+  echo "  --no-sddm            skip SDDM enable/start"
+  echo "  --no-reboot          skip reboot prompt at the end"
+  echo "  --reboot             reboot automatically at the end (no prompt)"
   echo "  --no-backup          do not backup existing configs"
   echo "  --copy               copy files (default)"
   echo "  --link               symlink ~/.config entries to repo instead of copying"
@@ -385,18 +397,68 @@ install_jhqs() {
   log_ok "jhqs done"
 }
 
+# mangowm + sddm are installed via packages.conf; this enables/starts the
+# SDDM display manager so the mango session is reachable after reboot.
+ensure_sddm() {
+  if ! pacman -Q sddm >/dev/null 2>&1; then
+    log_err "sddm is not installed (expected via packages.conf). Run with packages step first."
+    return 1
+  fi
+  if ! pacman -Q mangowm >/dev/null 2>&1; then
+    log_warn "mangowm is not installed — SDDM will have no mango session until packages are installed."
+  fi
+  log_info "Enabling SDDM display manager…"
+  # -f disables any competing display manager (gdm, lightdm, …)
+  run "sudo systemctl enable sddm.service -f"
+  if systemctl is-active --quiet sddm 2>/dev/null; then
+    log_ok "SDDM already running"
+  else
+    log_info "Starting SDDM… (a reboot still finishes the install)"
+    run "sudo systemctl start sddm.service"
+  fi
+  log_ok "sddm done"
+}
+
+prompt_reboot() {
+  if [[ "$NO_REBOOT" == true ]]; then
+    log_info "reboot prompt skipped (--no-reboot)"
+    return 0
+  fi
+  if [[ "$DRY_RUN" == true ]]; then
+    printf '[dry-run] prompt: Reboot now to finish installation? [y/N]\n'
+    return 0
+  fi
+  if [[ "$AUTO_REBOOT" == true ]]; then
+    log_warn "Rebooting now (--reboot)…"
+    sudo reboot
+    return 0
+  fi
+  local reply=""
+  read -rp "Reboot now to finish installation? [y/N] " reply || true
+  if [[ "$reply" =~ ^[YyJj]$ ]]; then
+    log_warn "Rebooting now…"
+    sudo reboot
+  else
+    log_info "Reboot skipped — please reboot manually to finish (sddm + mango)."
+  fi
+}
+
 main() {
   while (($# > 0)); do
     case "$1" in
       -y|--yes) ASSUME_YES=true ;;
       --dry-run) DRY_RUN=true ;;
-      --only-cachyos) DO_PACKAGES=false; DO_CONFIGS=false; DO_WALLPAPERS=false; DO_JHQS=false; DO_CACHYOS=true ;;
-      --only-packages) DO_CACHYOS=false; DO_CONFIGS=false; DO_WALLPAPERS=false; DO_JHQS=false; DO_PACKAGES=true ;;
-      --only-configs) DO_CACHYOS=false; DO_PACKAGES=false; DO_WALLPAPERS=false; DO_JHQS=false; DO_CONFIGS=true ;;
-      --only-wallpapers) DO_CACHYOS=false; DO_PACKAGES=false; DO_CONFIGS=false; DO_JHQS=false; DO_WALLPAPERS=true ;;
-      --only-jhqs) DO_CACHYOS=false; DO_PACKAGES=false; DO_CONFIGS=false; DO_WALLPAPERS=false; DO_JHQS=true ;;
+      --only-cachyos) DO_PACKAGES=false; DO_CONFIGS=false; DO_WALLPAPERS=false; DO_JHQS=false; DO_SDDM=false; DO_CACHYOS=true ;;
+      --only-packages) DO_CACHYOS=false; DO_CONFIGS=false; DO_WALLPAPERS=false; DO_JHQS=false; DO_SDDM=false; DO_PACKAGES=true ;;
+      --only-configs) DO_CACHYOS=false; DO_PACKAGES=false; DO_WALLPAPERS=false; DO_JHQS=false; DO_SDDM=false; DO_CONFIGS=true ;;
+      --only-wallpapers) DO_CACHYOS=false; DO_PACKAGES=false; DO_CONFIGS=false; DO_JHQS=false; DO_SDDM=false; DO_WALLPAPERS=true ;;
+      --only-jhqs) DO_CACHYOS=false; DO_PACKAGES=false; DO_CONFIGS=false; DO_WALLPAPERS=false; DO_SDDM=false; DO_JHQS=true ;;
+      --only-sddm) DO_CACHYOS=false; DO_PACKAGES=false; DO_CONFIGS=false; DO_WALLPAPERS=false; DO_JHQS=false; DO_SDDM=true ;;
       --no-cachyos) DO_CACHYOS=false ;;
       --no-packages) DO_PACKAGES=false ;;
+      --no-sddm) DO_SDDM=false ;;
+      --no-reboot) NO_REBOOT=true ;;
+      --reboot) AUTO_REBOOT=true; NO_REBOOT=false ;;
       --no-backup) DO_BACKUP=false ;;
       --copy) LINK_MODE=false ;;
       --link) LINK_MODE=true ;;
@@ -415,7 +477,7 @@ main() {
   echo "  jhqs target   : $JHQS_TARGET"
   echo "  pictures dir  : $(get_pictures_dir)/wallpapers"
   echo "  mode          : $([[ "$LINK_MODE" == true ]] && echo "symlink" || echo "copy") / backup $([[ "$DO_BACKUP" == true ]] && echo "on ($backup_root)" || echo "off")"
-  echo "  steps         : cachyos=$DO_CACHYOS packages=$DO_PACKAGES configs=$DO_CONFIGS wallpapers=$DO_WALLPAPERS jhqs=$DO_JHQS"
+  echo "  steps         : cachyos=$DO_CACHYOS packages=$DO_PACKAGES configs=$DO_CONFIGS wallpapers=$DO_WALLPAPERS jhqs=$DO_JHQS sddm=$DO_SDDM"
   echo ""
 
   if [[ ! -d "$root/.config" && ! -d "$root/wallpapers" ]]; then
@@ -441,12 +503,16 @@ main() {
   if [[ "$DO_JHQS" == true ]]; then
     install_jhqs "$backup_root"
   fi
+  if [[ "$DO_SDDM" == true ]]; then
+    ensure_sddm
+  fi
 
   echo ""
   log_ok "All done. Relogin to mango, then: qs -c jhqs ipc call jhqs reload"
   if [[ "$DO_BACKUP" == true && -d "$backup_root" ]]; then
     log_info "backups (if any) are in: $backup_root"
   fi
+  prompt_reboot
 }
 
 main "$@"
