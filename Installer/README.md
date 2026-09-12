@@ -3,12 +3,12 @@
 Installs [corzyy/dotfiles](https://github.com/corzyy/dotfiles) and
 [corzyy/jhqs](https://github.com/corzyy/jhqs) (quickshell config) on Arch/CachyOS.
 
-Location in repo: `~/Documents/dotfiles/Installer`
+Location in repo: `~/Documents/dotfiles/install.sh` (config: `~/Documents/dotfiles/Installer/packages.conf`)
 
 ## Quick start
 
 ```bash
-cd ~/Documents/dotfiles/Installer
+cd ~/Documents/dotfiles
 chmod +x install.sh
 ./install.sh --dry-run   # preview
 ./install.sh             # real install (asks for confirmation)
@@ -20,7 +20,7 @@ Fresh machine:
 ```bash
 sudo pacman -Sy git
 git clone https://github.com/corzyy/dotfiles.git ~/Documents/dotfiles
-~/Documents/dotfiles/Installer/install.sh
+~/Documents/dotfiles/install.sh
 ```
 
 ## What it does
@@ -83,10 +83,11 @@ Then re-run `./install.sh --only-packages -y`.
 
 ```text
 ~/Documents/dotfiles/
+  install.sh
   .config/btop, fastfetch, kitty, mango, …
   wallpapers/catppuccin, everforest, gruvbox, …
-  Installer/install.sh
   Installer/packages.conf
+  Installer/README.md
 ```
 
 Anything you add under `.config/` is picked up automatically on the next

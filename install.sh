@@ -37,7 +37,13 @@ DOTFILES_FALLBACK_DIR="$HOME/Documents/dotfiles"
 JHQS_TARGET="$HOME/.config/quickshell/jhqs"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PACKAGES_FILE="$SCRIPT_DIR/packages.conf"
+# packages.conf lives in Installer/ when install.sh is in the repo root,
+# or next to install.sh in the legacy Installer/ layout.
+if [[ -f "$SCRIPT_DIR/Installer/packages.conf" ]]; then
+  PACKAGES_FILE="$SCRIPT_DIR/Installer/packages.conf"
+else
+  PACKAGES_FILE="$SCRIPT_DIR/packages.conf"
+fi
 
 # --- options (defaults: copy mode, paru for AUR, backup on) ---
 ASSUME_YES=false
@@ -124,6 +130,12 @@ get_pictures_dir() {
 }
 
 resolve_dotfiles_root() {
+  # New layout: install.sh sits in the repo root itself.
+  if [[ -d "$SCRIPT_DIR/.config" || -d "$SCRIPT_DIR/wallpapers" || -d "$SCRIPT_DIR/.git" ]]; then
+    printf '%s' "$SCRIPT_DIR"
+    return 0
+  fi
+  # Legacy layout: install.sh inside Installer/, repo root is the parent.
   local candidate
   candidate="$(dirname "$SCRIPT_DIR")"
   if [[ -d "$candidate/.config" || -d "$candidate/wallpapers" || -d "$candidate/.git" ]]; then
@@ -134,7 +146,7 @@ resolve_dotfiles_root() {
     printf '%s' "$DOTFILES_FALLBACK_DIR"
     return 0
   fi
-  printf '%s' "$candidate"
+  printf '%s' "$SCRIPT_DIR"
 }
 
 ensure_paru() {
