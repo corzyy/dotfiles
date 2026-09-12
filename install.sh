@@ -23,6 +23,10 @@
 #   ./install.sh --only-jhqs
 #   ./install.sh --only-sddm      # only enable/start SDDM
 #   ./install.sh --no-cachyos     # skip CachyOS repo setup
+#   ./install.sh --no-packages    # skip package install
+#   ./install.sh --no-configs     # skip .config copy
+#   ./install.sh --no-wallpapers  # skip wallpaper install
+#   ./install.sh --no-jhqs        # skip jhqs clone/update
 #   ./install.sh --no-sddm        # skip SDDM enable/start
 #   ./install.sh --no-reboot      # skip reboot prompt at the end
 #   ./install.sh --reboot         # reboot automatically at the end (no prompt)
@@ -85,6 +89,9 @@ usage() {
   echo "  --only-sddm          only enable/start SDDM"
   echo "  --no-cachyos         skip CachyOS repo setup"
   echo "  --no-packages        skip package install"
+  echo "  --no-configs         skip .config copy"
+  echo "  --no-wallpapers      skip wallpaper install"
+  echo "  --no-jhqs            skip jhqs clone/update"
   echo "  --no-sddm            skip SDDM enable/start"
   echo "  --no-reboot          skip reboot prompt at the end"
   echo "  --reboot             reboot automatically at the end (no prompt)"
@@ -162,7 +169,10 @@ ensure_paru() {
   sudo pacman -S --needed --noconfirm base-devel git
   rm -rf /tmp/paru
   git clone https://aur.archlinux.org/paru.git /tmp/paru
-  (cd /tmp/paru && makepkg -si --noconfirm)
+  if ! (cd /tmp/paru && makepkg -si --noconfirm); then
+    log_err "building paru failed (see makepkg error above). Install paru manually, then re-run."
+    return 1
+  fi
   log_ok "paru installed"
 }
 
@@ -192,7 +202,10 @@ ensure_cachyos_repos() {
   curl -L -o /tmp/cachyos-repo.tar.xz https://mirror.cachyos.org/cachyos-repo.tar.xz
   tar xvf /tmp/cachyos-repo.tar.xz -C /tmp
   # cachyos-repo.sh must run as root from inside its own dir (uses ./install-*.awk + ./pacman.conf)
-  (cd /tmp/cachyos-repo && sudo ./cachyos-repo.sh --install)
+  if ! (cd /tmp/cachyos-repo && sudo ./cachyos-repo.sh --install); then
+    log_err "cachyos-repo.sh failed (see error above). Re-run with --only-cachyos once fixed."
+    return 1
+  fi
   log_ok "CachyOS repos enabled"
 }
 
@@ -229,7 +242,10 @@ install_packages() {
   done
 
   log_info "Syncing package databases…"
-  run "sudo pacman -Sy"
+  if ! run "sudo pacman -Sy"; then
+    log_err "pacman database sync failed (network? mirrors? keyring?). Fix that and re-run."
+    return 1
+  fi
 
   # Official packages; fall back to paru if pacman doesn't know them
   # (e.g. mangowm is official on CachyOS but AUR on vanilla Arch).
@@ -248,7 +264,10 @@ install_packages() {
       fi
     done
     if ((${#to_install[@]} > 0)); then
-      run "sudo pacman -S --needed --noconfirm ${to_install[*]}"
+      if ! run "sudo pacman -S --needed --noconfirm ${to_install[*]}"; then
+        log_err "pacman install failed for: ${to_install[*]} (see pacman's error above)."
+        return 1
+      fi
     fi
   fi
 
@@ -266,7 +285,10 @@ install_packages() {
       fi
     done
     if ((${#aur_missing[@]} > 0)); then
-      run "paru -S --needed --noconfirm ${aur_missing[*]}"
+      if ! run "paru -S --needed --noconfirm ${aur_missing[*]}"; then
+        log_err "paru install failed for: ${aur_missing[*]} (see the error above)."
+        return 1
+      fi
     fi
   fi
   log_ok "packages done"
@@ -370,8 +392,16 @@ install_jhqs() {
   local backup_root="$1"
   log_info "Installing jhqs: $JHQS_REPO -> $JHQS_TARGET"
   if [[ -d "$JHQS_TARGET/.git" ]]; then
-    log_info "existing jhqs checkout found — pulling latest…"
-    run "git -C \"$JHQS_TARGET\" pull --ff-only"
+    if [[ -n "$(git -C "$JHQS_TARGET" status --porcelain 2>/dev/null)" ]]; then
+      log_warn "jhqs has local changes — skipping auto-pull so nothing gets overwritten."
+      log_warn "  to update manually: git -C \"$JHQS_TARGET\" stash && git -C \"$JHQS_TARGET\" pull --ff-only && git -C \"$JHQS_TARGET\" stash pop"
+      log_warn "  continuing with your existing checkout…"
+    else
+      log_info "existing jhqs checkout found — pulling latest…"
+      if ! run "git -C \"$JHQS_TARGET\" pull --ff-only"; then
+        log_warn "could not update jhqs (offline? diverged branch?) — continuing with existing checkout."
+      fi
+    fi
   else
     if [[ -e "$JHQS_TARGET" ]]; then
       if [[ "$DO_BACKUP" == true ]]; then
@@ -421,12 +451,17 @@ ensure_sddm() {
   fi
   log_info "Enabling SDDM display manager…"
   # -f disables any competing display manager (gdm, lightdm, …)
-  run "sudo systemctl enable sddm.service -f"
+  if ! run "sudo systemctl enable sddm.service -f"; then
+    log_err "could not enable sddm (see sudo/systemctl error above)."
+    return 1
+  fi
   if systemctl is-active --quiet sddm 2>/dev/null; then
     log_ok "SDDM already running"
   else
     log_info "Starting SDDM… (a reboot still finishes the install)"
-    run "sudo systemctl start sddm.service"
+    if ! run "sudo systemctl start sddm.service"; then
+      log_warn "could not start sddm right now — a reboot will start it. Continuing…"
+    fi
   fi
   log_ok "sddm done"
 }
@@ -468,6 +503,9 @@ main() {
       --only-sddm) DO_CACHYOS=false; DO_PACKAGES=false; DO_CONFIGS=false; DO_WALLPAPERS=false; DO_JHQS=false; DO_SDDM=true ;;
       --no-cachyos) DO_CACHYOS=false ;;
       --no-packages) DO_PACKAGES=false ;;
+      --no-configs) DO_CONFIGS=false ;;
+      --no-wallpapers) DO_WALLPAPERS=false ;;
+      --no-jhqs) DO_JHQS=false ;;
       --no-sddm) DO_SDDM=false ;;
       --no-reboot) NO_REBOOT=true ;;
       --reboot) AUTO_REBOOT=true; NO_REBOOT=false ;;
@@ -499,6 +537,16 @@ main() {
   fi
 
   confirm || { log_info "aborted."; exit 0; }
+
+  # Ask for sudo once, upfront, so system steps can't die midway on a password prompt.
+  if [[ "$DRY_RUN" == false && ("$DO_CACHYOS" == true || "$DO_PACKAGES" == true || "$DO_SDDM" == true) ]]; then
+    log_info "Requesting sudo upfront (needed for system steps)…"
+    if ! sudo -v; then
+      log_err "sudo authentication failed — cannot run system steps."
+      log_err "Re-run with --no-cachyos --no-packages --no-sddm to skip them."
+      exit 1
+    fi
+  fi
 
   if [[ "$DO_CACHYOS" == true ]]; then
     ensure_cachyos_repos

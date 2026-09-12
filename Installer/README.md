@@ -72,6 +72,9 @@ Then re-run `./install.sh --only-packages -y`.
 | `--only-cachyos` / `--only-packages` / `--only-configs` / `--only-wallpapers` / `--only-jhqs` / `--only-sddm` | run one step |
 | `--no-cachyos` | skip CachyOS repo setup |
 | `--no-packages` | skip package install |
+| `--no-configs` | skip .config copy |
+| `--no-wallpapers` | skip wallpaper install |
+| `--no-jhqs` | skip jhqs clone/update |
 | `--no-sddm` | skip SDDM enable/start |
 | `--no-reboot` | skip reboot prompt at the end |
 | `--reboot` | reboot automatically at the end (no prompt) |
