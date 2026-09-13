@@ -1,0 +1,89 @@
+[config]
+# prefer method when multiple source colors found
+prefer = "saturation"
+# contrast = 0.0
+
+[templates.quickshell]
+input_path = "/home/jakob/.config/matugen/templates/quickshell-colors.json"
+output_path = "/home/jakob/.config/quickshell/jhqs/themes/matugen.json"
+
+[templates.hyprland]
+input_path = "/home/jakob/.config/matugen/templates/hyprland-colors.lua"
+output_path = "/home/jakob/.config/hypr/matugen-colors.lua"
+
+[templates.mango]
+input_path = "/home/jakob/.config/matugen/templates/colors.conf"
+output_path = "/home/jakob/.config/mango/colors.conf"
+post_hook = "mmsg dispatch reload_config >/dev/null 2>&1 || true"
+
+[templates.opencode]
+input_path = "/home/jakob/.config/matugen/templates/opencode.json"
+output_path = "/home/jakob/.config/opencode/themes/matugen.json"
+
+[templates.vscode-raw]
+input_path = "/home/jakob/.config/matugen/templates/vscode-colors"
+output_path = "/home/jakob/.cache/matugen/vscode-colors"
+
+[templates.vscode-json]
+input_path = "/home/jakob/.config/matugen/templates/vscode-colors.json"
+output_path = "/home/jakob/.cache/matugen/vscode-colors.json"
+
+[templates.gtk3]
+input_path = "/home/jakob/.config/matugen/templates/gtk-colors.css"
+output_path = "/home/jakob/.config/gtk-3.0/colors.css"
+post_hook = "bash -c 'gsettings set org.gnome.desktop.interface gtk-theme \"\"; if [ \"{{mode}}\" = \"dark\" ]; then gsettings set org.gnome.desktop.interface gtk-theme \"adw-gtk3-dark\"; else gsettings set org.gnome.desktop.interface gtk-theme \"adw-gtk3\"; fi'"
+# Spec original: gsettings set org.gnome.desktop.interface gtk-theme ""; gsettings set org.gnome.desktop.interface gtk-theme adw-gtk3-{{mode}}
+# Fixed to handle light (adw-gtk3) vs dark (adw-gtk3-dark) correctly
+
+[templates.gtk4]
+input_path = "/home/jakob/.config/matugen/templates/gtk-colors.css"
+output_path = "/home/jakob/.config/gtk-4.0/colors.css"
+post_hook = "/home/jakob/.config/matugen/post-hook-scripts/gtk-themes-reload.sh"
+
+[templates.obs]
+input_path = "/home/jakob/.config/matugen/templates/matugen.obt"
+output_path = "/home/jakob/.var/app/com.obsproject.Studio/config/obs-studio/themes/matugen.obt"
+
+[templates.obs-native]
+input_path = "/home/jakob/.config/matugen/templates/matugen.obt"
+output_path = "/home/jakob/.config/obs-studio/themes/matugen.obt"
+
+[templates.papirus]
+input_path = "/home/jakob/.config/matugen/templates/papirus-folders.sh"
+output_path = "/home/jakob/.cache/matugen/papirus-folders.sh"
+post_hook = "bash /home/jakob/.cache/matugen/papirus-folders.sh"
+
+[templates.btop]
+input_path = "/home/jakob/.config/matugen/templates/btop.theme"
+output_path = "/home/jakob/.config/btop/themes/matugen.theme"
+post_hook = "sed -i -E 's/^color_theme *= *\".*\"/color_theme = \"matugen\"/; s/^theme_background *= *.*/theme_background = False/' /home/jakob/.config/btop/btop.conf 2>/dev/null; pkill -USR2 btop 2>/dev/null || true"
+
+[templates.vesktop-midnight]
+input_path = "/home/jakob/.config/matugen/templates/midnight-discord.css"
+output_path = "/home/jakob/.config/vesktop/themes/midnight-discord.css"
+
+[templates.vesktop-system24]
+input_path = "/home/jakob/.config/matugen/templates/system24.css"
+output_path = "/home/jakob/.config/vesktop/themes/system24.css"
+
+[templates.prismlauncher]
+input_path = "/home/jakob/.config/matugen/templates/prismlauncher.json"
+output_path = "/home/jakob/.local/share/PrismLauncher/themes/Matugen/theme.json"
+
+[templates.qt5ct]
+input_path = "/home/jakob/.config/matugen/templates/qtct-colors.conf"
+output_path = "/home/jakob/.config/qt5ct/colors/matugen.conf"
+
+[templates.qt6ct]
+input_path = "/home/jakob/.config/matugen/templates/qtct-colors.conf"
+output_path = "/home/jakob/.config/qt6ct/colors/matugen.conf"
+
+[templates.qt-colorscheme]
+input_path = "/home/jakob/.config/matugen/templates/Matugen.colors"
+output_path = "/home/jakob/.local/share/color-schemes/Matugen.colors"
+
+[templates.kitty]
+input_path = "/home/jakob/.config/matugen/templates/kitty-colors.conf"
+output_path = "/home/jakob/.config/kitty/current-theme.conf"
+post_hook = "killall -USR1 kitty 2>/dev/null || pkill -USR1 kitty 2>/dev/null || true"
+
