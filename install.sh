@@ -475,7 +475,8 @@ write_if_changed() {
   log_ok "wrote ${path/#$HOME/\~}"
 }
 
-# Write the GTK settings (theme + cursor) for GTK3 and GTK4 apps.
+# Write the GTK settings (theme + cursor) for GTK3 and GTK4 apps, and hook in
+# the matugen palette so GTK follows the wallpaper theme.
 write_gtk_settings() {
   write_if_changed "$HOME/.config/gtk-3.0/settings.ini" "[Settings]
 gtk-theme-name=$GTK_THEME
@@ -486,6 +487,24 @@ gtk-cursor-theme-size=$CURSOR_SIZE"
 gtk-application-prefer-dark-theme=1
 gtk-cursor-theme-name=$CURSOR_THEME
 gtk-cursor-theme-size=$CURSOR_SIZE"
+  write_gtk_css
+}
+
+# gtk.css imports the matugen-generated colors.css, which is what actually
+# applies the wallpaper palette to GTK apps. Seed an empty colors.css so the
+# import resolves before matugen has run for the first time.
+write_gtk_css() {
+  local dir css
+  write_if_changed "$HOME/.config/gtk-3.0/gtk.css" '@import url("colors.css");'
+  write_if_changed "$HOME/.config/gtk-4.0/gtk.css" '@import url("colors.css");'
+  for dir in gtk-3.0 gtk-4.0; do
+    css="$HOME/.config/$dir/colors.css"
+    if [[ ! -f "$css" ]]; then
+      run mkdir -p "$(dirname "$css")"
+      run touch "$css"
+      log_ok "seeded ${css/#$HOME/\~} (matugen overwrites it)"
+    fi
+  done
 }
 
 # Apply adw-gtk3 to GTK3 apps. On wlroots/mango there is no XSettings daemon,

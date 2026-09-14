@@ -52,9 +52,11 @@ sudo dnf install -y git && git clone https://github.com/corzyy/dotfiles.git ~/Do
 4. **configs** — copies `.config/*` from the repo into `~/.config`. Existing
    entries are backed up to `~/.config_backup_<date>` first (unless identical).
    `wallpapers` is handled separately. Use `--link` for symlinks instead.
-5. **gtk** — applies `adw-gtk3-dark` to GTK applications by writing
-   `~/.config/gtk-3.0/settings.ini` (and gtk-4.0), and sets the matching
-   `gsettings` keys. `adw-gtk3-theme` itself comes from `PACKAGES`.
+5. **gtk** — applies the dark `adw-gtk3-dark` theme to GTK applications by
+   writing `~/.config/gtk-3.0/settings.ini` (and gtk-4.0) and setting the
+   matching `gsettings` keys. It also writes a `gtk.css` that imports matugen's
+   `colors.css`, so GTK follows the wallpaper palette. `adw-gtk3-theme` itself
+   comes from `PACKAGES`.
 6. **cursor** — installs the bundled `MacOS-Tahoe-Cursor` theme from
    `.local/share/icons/` into `~/.local/share/icons/`, and sets it as the
    session default (gsettings, `gtk-cursor-theme-name`, and
