@@ -10,10 +10,12 @@
 #   2. terra      enable the Terra repository (mangowm, nerd fonts)
 #   3. packages   install the set defined in Installer/packages.conf
 #   4. configs    copy .config/* into ~/.config (with backup)
-#   5. fisher     install/update the fish plugins listed in fish_plugins
-#   6. wallpapers copy wallpapers/ into the XDG Pictures directory
-#   7. jhqs       clone/update the Quickshell config and the launcher
-#   8. sddm       enable + start SDDM and default to graphical.target
+#   5. gtk        apply adw-gtk3 to GTK applications
+#   6. cursor     install + apply the bundled MacOS-Tahoe cursor
+#   7. fisher     install/update the fish plugins listed in fish_plugins
+#   8. wallpapers copy wallpapers/ into the XDG Pictures directory
+#   9. jhqs       clone/update the Quickshell config and the launcher
+#  10. sddm       enable + start SDDM and default to graphical.target
 #
 # Usage: ./install.sh [options]     (see --help)
 
@@ -25,6 +27,11 @@ DOTFILES_DEFAULT_DIR="$HOME/Documents/dotfiles"
 JHQS_TARGET="$HOME/.config/quickshell/jhqs"
 BACKUP_DIR="$HOME/.config_backup_$(date +%Y%m%d_%H%M%S)"
 
+# Desktop appearance defaults applied by the gtk/cursor steps.
+GTK_THEME="adw-gtk3-dark"
+CURSOR_THEME="MacOS-Tahoe-Cursor"
+CURSOR_SIZE="24"
+
 # When run as `curl … | bash` there is no script path. SCRIPT_DIR stays empty
 # and the repository is cloned on demand in main().
 SCRIPT_PATH="${BASH_SOURCE[0]:-}"
@@ -34,6 +41,7 @@ else
   SCRIPT_DIR=""
 fi
 PACKAGES_FILE=""
+REPO_ROOT=""
 
 # --------------------------------------------------------------- options ---
 ASSUME_YES=false
@@ -46,6 +54,8 @@ DO_WALLPAPERS=true
 DO_JHQS=true
 DO_SDDM=true
 DO_FISHER=true
+DO_GTK=true
+DO_CURSOR=true
 DO_BACKUP=true
 LINK_MODE=false
 AUTO_REBOOT=false
@@ -78,7 +88,7 @@ Usage: ./install.sh [options]
 
 One-line install (clones the repo to ~/Documents/dotfiles if needed):
 
-  curl -fsSL https://raw.githubusercontent.com/corzyy/dotfiles/main/install.sh | bash
+  curl -fsSL https://github.com/corzyy/dotfiles/raw/main/install.sh | bash
 
 Pass options after `bash -s --`, e.g. `... | bash -s -- --dry-run`.
 
@@ -93,7 +103,7 @@ File handling:
       --no-backup     overwrite existing configs without backing them up
 
 Steps (skip with --no-<step>, run only these with --only-<step>):
-  base, terra, packages, configs, fisher, wallpapers, jhqs, sddm
+  base, terra, packages, configs, gtk, cursor, fisher, wallpapers, jhqs, sddm
 
 Reboot:
       --no-reboot     do not ask to reboot at the end
@@ -171,27 +181,55 @@ resolve_root() {
   printf '%s' "$DOTFILES_DEFAULT_DIR"
 }
 
-packages_file_for_root() {
-  if [[ -f "$1/Installer/packages.conf" || ! -f "$1/packages.conf" ]]; then
-    printf '%s' "$1/Installer/packages.conf"
-  else
-    printf '%s' "$1/packages.conf"
+# Locate packages.conf. The repo ships it in Installer/, but tolerate a flat
+# layout and a `curl … | bash` run where only the clone dir is known.
+resolve_packages_file() {
+  local candidates=() c
+  if [[ -n "${REPO_ROOT:-}" ]]; then
+    candidates+=("$REPO_ROOT/Installer/packages.conf" "$REPO_ROOT/packages.conf")
   fi
+  if [[ -n "$SCRIPT_DIR" ]]; then
+    candidates+=("$SCRIPT_DIR/Installer/packages.conf" "$SCRIPT_DIR/packages.conf")
+  fi
+  candidates+=(
+    "$DOTFILES_DEFAULT_DIR/Installer/packages.conf"
+    "$DOTFILES_DEFAULT_DIR/packages.conf"
+  )
+  for c in "${candidates[@]}"; do
+    if [[ -f "$c" ]]; then
+      printf '%s' "$c"
+      return 0
+    fi
+  done
+  # Nothing found yet — return the canonical location for the error message.
+  printf '%s' "${REPO_ROOT:-$DOTFILES_DEFAULT_DIR}/Installer/packages.conf"
 }
 
-# `curl … | bash`: clone the repository when no local copy is present.
+# `curl … | bash`: clone or update the repository when needed. A local copy
+# counts as usable only when it also contains a packages file, so a stale or
+# half-finished checkout is refreshed instead of used.
 bootstrap_repo() {
   local root="$1"
-  if [[ -d "$root/.config" || -d "$root/wallpapers" ]]; then
+  if [[ ( -d "$root/.config" || -d "$root/wallpapers" ) \
+    && ( -f "$root/Installer/packages.conf" || -f "$root/packages.conf" ) ]]; then
     return 0
   fi
   if [[ "$DRY_RUN" == true ]]; then
-    printf '[dry-run] git clone %s %s\n' "$DOTFILES_REPO" "$root"
+    if [[ -d "$root/.git" ]]; then
+      printf '[dry-run] git -C %s pull --ff-only\n' "$root"
+    else
+      printf '[dry-run] git clone %s %s\n' "$DOTFILES_REPO" "$root"
+    fi
     return 0
   fi
   if ! command -v git >/dev/null 2>&1; then
     log_info "git not found — installing it first"
     run_root "$DNF" install -y git
+  fi
+  if [[ -d "$root/.git" ]]; then
+    log_info "updating existing checkout in $root"
+    run git -C "$root" pull --ff-only || log_warn "could not update $root — continuing"
+    return 0
   fi
   log_info "cloning $DOTFILES_REPO into $root"
   run mkdir -p "$(dirname "$root")"
@@ -210,10 +248,26 @@ pictures_dir() {
   printf '%s' "$dir"
 }
 
+# Create/refresh the localized XDG user directories (Pictures, Documents, …)
+# and ~/.config/user-dirs.dirs. Without this a Minimal install has no Pictures
+# dir, so wallpapers would land in the fallback ~/Pictures even on a localized
+# system.
+ensure_xdg_dirs() {
+  if ! command -v xdg-user-dirs-update >/dev/null 2>&1; then
+    log_info "xdg-user-dirs-update not available — skipping"
+    return 0
+  fi
+  log_info "creating/updating XDG user directories"
+  run xdg-user-dirs-update
+  log_ok "XDG user directories ready (Pictures: $(pictures_dir))"
+}
+
 # ------------------------------------------------------------- packages ---
 load_packages() {
+  PACKAGES_FILE="$(resolve_packages_file)"
   if [[ ! -f "$PACKAGES_FILE" ]]; then
-    log_err "package config not found: $PACKAGES_FILE"
+    log_err "package config not found (looked for Installer/packages.conf and packages.conf)"
+    log_err "expected it under: ${REPO_ROOT:-$DOTFILES_DEFAULT_DIR}"
     return 1
   fi
   BASE_PACKAGES=()
@@ -386,6 +440,87 @@ install_configs() {
   done < <(find "$src" -mindepth 1 -maxdepth 1 -print0 | sort -z)
   make_scripts_executable
   log_ok "configs done"
+}
+
+# ------------------------------------------------------------------ gtk ---
+# Write a file only when its content differs, so re-running stays quiet.
+write_if_changed() {
+  local path="$1" content="$2"
+  if [[ -f "$path" && "$(cat "$path")" == "$content" ]]; then
+    log_ok "already up to date: ${path/#$HOME/\~}"
+    return 0
+  fi
+  if [[ "$DRY_RUN" == true ]]; then
+    printf '[dry-run] write %s\n' "$path"
+    return 0
+  fi
+  run mkdir -p "$(dirname "$path")"
+  printf '%s\n' "$content" > "$path"
+  log_ok "wrote ${path/#$HOME/\~}"
+}
+
+# Write the GTK settings (theme + cursor) for GTK3 and GTK4 apps.
+write_gtk_settings() {
+  write_if_changed "$HOME/.config/gtk-3.0/settings.ini" "[Settings]
+gtk-theme-name=$GTK_THEME
+gtk-application-prefer-dark-theme=1
+gtk-cursor-theme-name=$CURSOR_THEME
+gtk-cursor-theme-size=$CURSOR_SIZE"
+  write_if_changed "$HOME/.config/gtk-4.0/settings.ini" "[Settings]
+gtk-application-prefer-dark-theme=1
+gtk-cursor-theme-name=$CURSOR_THEME
+gtk-cursor-theme-size=$CURSOR_SIZE"
+}
+
+# Apply adw-gtk3 to GTK3 apps. On wlroots/mango there is no XSettings daemon,
+# so the theme must be set in gtk-3.0/settings.ini; gsettings alone only
+# reaches apps that go through a settings portal.
+apply_gtk_theme() {
+  if [[ "$DRY_RUN" == false ]] && ! rpm -q adw-gtk3-theme >/dev/null 2>&1; then
+    log_warn "adw-gtk3-theme is not installed — skipping GTK theme setup"
+    return 0
+  fi
+  log_info "applying $GTK_THEME to GTK applications"
+  write_gtk_settings
+  if command -v gsettings >/dev/null 2>&1; then
+    run gsettings set org.gnome.desktop.interface gtk-theme "$GTK_THEME" \
+      || log_warn "could not set gtk-theme via gsettings — continuing"
+    run gsettings set org.gnome.desktop.interface color-scheme prefer-dark \
+      || log_warn "could not set color-scheme via gsettings — continuing"
+  fi
+  log_ok "GTK theme applied"
+}
+
+# Install the bundled cursor theme and make it the session default. MangoWM
+# reads the theme from looknfeel.conf; gsettings, settings.ini and the
+# environment.d file cover GTK/Qt apps and the rest of the session.
+apply_cursor_theme() {
+  local src="$REPO_ROOT/.local/share/icons/$CURSOR_THEME"
+  local dest="$HOME/.local/share/icons/$CURSOR_THEME"
+  if [[ -d "$src" ]]; then
+    log_info "installing cursor theme: $CURSOR_THEME"
+    run mkdir -p "$HOME/.local/share/icons"
+    if command -v rsync >/dev/null 2>&1; then
+      run rsync -a "$src/" "$dest/"
+    else
+      run cp -a "$src" "$HOME/.local/share/icons/"
+    fi
+  else
+    log_warn "cursor theme not found in the repository: $src (skipping files)"
+  fi
+
+  if command -v gsettings >/dev/null 2>&1; then
+    run gsettings set org.gnome.desktop.interface cursor-theme "$CURSOR_THEME" \
+      || log_warn "could not set cursor-theme via gsettings — continuing"
+    run gsettings set org.gnome.desktop.interface cursor-size "$CURSOR_SIZE" \
+      || log_warn "could not set cursor-size via gsettings — continuing"
+  fi
+
+  write_gtk_settings
+  write_if_changed "$HOME/.config/environment.d/cursor.conf" \
+    "XCURSOR_THEME=$CURSOR_THEME
+XCURSOR_SIZE=$CURSOR_SIZE"
+  log_ok "cursor theme applied"
 }
 
 # ----------------------------------------------------------- wallpapers ---
@@ -563,6 +698,7 @@ prompt_reboot() {
 disable_all_steps() {
   DO_BASE=false; DO_TERRA=false; DO_PACKAGES=false; DO_CONFIGS=false
   DO_WALLPAPERS=false; DO_JHQS=false; DO_SDDM=false; DO_FISHER=false
+  DO_GTK=false; DO_CURSOR=false
 }
 
 # --only-<step>: on first use select just the requested step(s); additional
@@ -592,6 +728,8 @@ main() {
       --only-packages) only_step DO_PACKAGES ;;
       --only-configs) only_step DO_CONFIGS ;;
       --only-fisher) only_step DO_FISHER ;;
+      --only-gtk) only_step DO_GTK ;;
+      --only-cursor) only_step DO_CURSOR ;;
       --only-wallpapers) only_step DO_WALLPAPERS ;;
       --only-jhqs) only_step DO_JHQS ;;
       --only-sddm) only_step DO_SDDM ;;
@@ -600,6 +738,8 @@ main() {
       --no-packages) DO_PACKAGES=false ;;
       --no-configs) DO_CONFIGS=false ;;
       --no-fisher) DO_FISHER=false ;;
+      --no-gtk) DO_GTK=false ;;
+      --no-cursor) DO_CURSOR=false ;;
       --no-wallpapers) DO_WALLPAPERS=false ;;
       --no-jhqs) DO_JHQS=false ;;
       --no-sddm) DO_SDDM=false ;;
@@ -623,7 +763,8 @@ main() {
 
   local root
   root="$(resolve_root)"
-  PACKAGES_FILE="$(packages_file_for_root "$root")"
+  REPO_ROOT="$root"
+  PACKAGES_FILE="$(resolve_packages_file)"
 
   local mode backup_state
   [[ "$LINK_MODE" == true ]] && mode="symlink" || mode="copy"
@@ -634,7 +775,7 @@ main() {
   echo "  packages : $PACKAGES_FILE"
   echo "  dnf      : $DNF"
   echo "  mode     : $mode (backup: $backup_state)"
-  echo "  steps    : base=$DO_BASE terra=$DO_TERRA packages=$DO_PACKAGES configs=$DO_CONFIGS fisher=$DO_FISHER wallpapers=$DO_WALLPAPERS jhqs=$DO_JHQS sddm=$DO_SDDM"
+  echo "  steps    : base=$DO_BASE terra=$DO_TERRA packages=$DO_PACKAGES configs=$DO_CONFIGS fisher=$DO_FISHER gtk=$DO_GTK cursor=$DO_CURSOR wallpapers=$DO_WALLPAPERS jhqs=$DO_JHQS sddm=$DO_SDDM"
   echo ""
 
   confirm || { log_info "aborted"; exit 0; }
@@ -651,17 +792,20 @@ main() {
 
   bootstrap_repo "$root"
   # Re-resolve now that the repository may have just been cloned.
-  PACKAGES_FILE="$(packages_file_for_root "$root")"
-  if [[ "$DRY_RUN" == true && ! -d "$root/.config" && ! -d "$root/wallpapers" ]]; then
-    log_warn "preview without a local repository — showing the clone step only"
+  PACKAGES_FILE="$(resolve_packages_file)"
+  if [[ "$DRY_RUN" == true ]] && { [[ ! -d "$root/.config" && ! -d "$root/wallpapers" ]] || [[ ! -f "$PACKAGES_FILE" ]]; }; then
+    log_warn "preview: repository/packages.conf not available — showing the clone/update step only"
     DO_BASE=false; DO_TERRA=false; DO_PACKAGES=false
     DO_CONFIGS=false; DO_FISHER=false; DO_WALLPAPERS=false
   fi
 
   if [[ "$DO_BASE" == true ]]; then ensure_base; fi
+  if [[ "$DO_CONFIGS" == true || "$DO_WALLPAPERS" == true ]]; then ensure_xdg_dirs; fi
   if [[ "$DO_TERRA" == true ]]; then ensure_terra; fi
   if [[ "$DO_PACKAGES" == true ]]; then install_packages; fi
   if [[ "$DO_CONFIGS" == true ]]; then install_configs "$root"; fi
+  if [[ "$DO_GTK" == true ]]; then apply_gtk_theme; fi
+  if [[ "$DO_CURSOR" == true ]]; then apply_cursor_theme; fi
   if [[ "$DO_FISHER" == true ]]; then install_fish_plugins; fi
   if [[ "$DO_WALLPAPERS" == true ]]; then install_wallpapers "$root"; fi
   if [[ "$DO_JHQS" == true ]]; then install_jhqs; fi
