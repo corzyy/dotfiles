@@ -340,6 +340,12 @@ install_packages() {
   if [[ "$NO_TERRA" == false ]]; then
     ensure_terra
   fi
+
+  # Terra was just added: refresh metadata as root so the availability checks
+  # below (which may run unprivileged) actually see packages like mangowm.
+  log_info "refreshing package metadata…"
+  run_root "$DNF" makecache || log_warn "could not refresh metadata — continuing"
+
   local pkgs=()
   dedupe_into pkgs ${PACKAGES[@]+"${PACKAGES[@]}"}
   if ((${#pkgs[@]} == 0)); then
@@ -369,13 +375,17 @@ install_packages() {
     log_warn "not available in the enabled repositories: ${missing[*]}"
   fi
 
-  # Without these the Mango session cannot come up at all.
+  # Without these the Mango session cannot come up at all. Retry a direct
+  # install first, in case the availability check missed a just-enabled repo.
   local critical
   for critical in mangowm quickshell sddm; do
     if ! pkg_installed "$critical"; then
-      log_err "required package is missing: $critical"
-      log_err "make sure Terra is enabled, then re-run: ./install.sh --only-packages -y"
-      return 1
+      log_warn "required package not resolved from metadata — retrying directly: $critical"
+      if ! run_root "$DNF" install -y "$critical"; then
+        log_err "required package is missing: $critical"
+        log_err "check the Terra repo, then re-run: ./install.sh --only-packages -y"
+        return 1
+      fi
     fi
   done
   log_ok "packages done"

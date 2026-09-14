@@ -135,6 +135,9 @@ Anything you add under `.config/` is picked up automatically on the next
 
 - The installer uses `dnf5` when present, otherwise `dnf`.
 - MangoWM comes from Terra — no COPR is needed.
+- The package step runs `dnf makecache` right after enabling Terra, so the
+  new repo's metadata is available to the package checks (otherwise `mangowm`
+  can be reported as missing on a fresh install).
 - The shipped matugen templates use portable `~/…` paths, so theming works for
   any username.
 - Mango autostart expects the `jhqs` launcher and `wallpaper-restore.sh`; both
