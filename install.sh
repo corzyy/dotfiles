@@ -316,6 +316,14 @@ ensure_base() {
   log_ok "base tools done"
 }
 
+# Make dnf assume "yes" by default so any interactive invocation (and steps
+# not passing -y) do not stop on the "Is this ok?" prompt.
+configure_dnf() {
+  log_info "configuring dnf: defaultyes=True"
+  run_root "$DNF" config-manager setopt defaultyes=True \
+    || log_warn "could not set dnf defaultyes — continuing"
+}
+
 ensure_terra() {
   load_packages
   if [[ "${ENABLE_TERRA:-true}" != "true" ]]; then
@@ -818,6 +826,10 @@ main() {
       log_err "skip the system steps with: --no-base --no-terra --no-packages --no-sddm"
       exit 1
     fi
+  fi
+
+  if [[ "$DO_BASE" == true || "$DO_TERRA" == true || "$DO_PACKAGES" == true ]]; then
+    configure_dnf
   fi
 
   bootstrap_repo "$root"
