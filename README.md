@@ -20,7 +20,17 @@ cd ~/Documents/dotfiles
 ./install.sh -y          # no confirmation prompt
 ```
 
-Fresh-machine one-liner:
+Or install in a single line — the script clones the repo for you and then runs
+itself from `~/Documents/dotfiles`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/corzyy/dotfiles/main/install.sh | bash
+```
+
+Add options after `bash -s --`, e.g. `... | bash -s -- -y` (no prompt) or
+`... | bash -s -- --dry-run` (preview).
+
+Fresh-machine one-liner (git clone + install):
 
 ```bash
 sudo dnf install -y git && git clone https://github.com/corzyy/dotfiles.git ~/Documents/dotfiles && ~/Documents/dotfiles/install.sh
@@ -29,7 +39,7 @@ sudo dnf install -y git && git clone https://github.com/corzyy/dotfiles.git ~/Do
 ## What it does
 
 1. **base** — installs the tools a Minimal install lacks (`git`, `curl`,
-   `rsync`, `xdg-user-dirs`, `accountsservice`). From `BASE_PACKAGES`.
+   `rsync`, `tar`, `xdg-user-dirs`, `accountsservice`). From `BASE_PACKAGES`.
 2. **terra** — enables the Terra third-party repository, which provides
    `mangowm` and `jetbrainsmono-nerd-fonts`. Skipped if
    `/etc/yum.repos.d/terra.repo` already exists, or when
@@ -41,12 +51,15 @@ sudo dnf install -y git && git clone https://github.com/corzyy/dotfiles.git ~/Do
 4. **configs** — copies `.config/*` from the repo into `~/.config`. Existing
    entries are backed up to `~/.config_backup_<date>` first (unless identical).
    `wallpapers` is handled separately. Use `--link` for symlinks instead.
-5. **wallpapers** — copies `wallpapers/` to your Pictures folder, resolved via
+5. **fisher** — installs fisher if needed and runs `fisher update` to install
+   the fish plugins listed in `.config/fish/fish_plugins`
+   (`jorgebucaran/fisher`, `pure-fish/pure`).
+6. **wallpapers** — copies `wallpapers/` to your Pictures folder, resolved via
    `xdg-user-dir PICTURES` (so `~/Pictures`, `~/Bilder`, … all work).
-6. **jhqs** — clones/updates `corzyy/jhqs` to `~/.config/quickshell/jhqs`,
+7. **jhqs** — clones/updates `corzyy/jhqs` to `~/.config/quickshell/jhqs`,
    makes `scripts/*.sh` executable, and creates
    `~/.local/bin/jhqs -> /usr/bin/quickshell` for the Mango autostart.
-7. **sddm** — enables and starts SDDM, sets `graphical.target` as the default
+8. **sddm** — enables and starts SDDM, sets `graphical.target` as the default
    boot target (Minimal boots to `multi-user.target` otherwise), enables
    `NetworkManager` if needed, and checks for the `mango.desktop` session.
 
@@ -87,8 +100,8 @@ Then re-run only the package step:
 | `--reboot` | reboot automatically when finished |
 | `-h`, `--help` | show help |
 
-Steps are `base`, `terra`, `packages`, `configs`, `wallpapers`, `jhqs`, `sddm`.
-For example `./install.sh --only-terra --only-packages -y`, or
+Steps are `base`, `terra`, `packages`, `configs`, `fisher`, `wallpapers`,
+`jhqs`, `sddm`. Example: `./install.sh --only-configs --only-fisher -y`, or
 `./install.sh --no-sddm` to install everything but leave the display manager
 alone.
 

@@ -10,9 +10,10 @@
 #   2. terra      enable the Terra repository (mangowm, nerd fonts)
 #   3. packages   install the set defined in Installer/packages.conf
 #   4. configs    copy .config/* into ~/.config (with backup)
-#   5. wallpapers copy wallpapers/ into the XDG Pictures directory
-#   6. jhqs       clone/update the Quickshell config and the launcher
-#   7. sddm       enable + start SDDM and default to graphical.target
+#   5. fisher     install/update the fish plugins listed in fish_plugins
+#   6. wallpapers copy wallpapers/ into the XDG Pictures directory
+#   7. jhqs       clone/update the Quickshell config and the launcher
+#   8. sddm       enable + start SDDM and default to graphical.target
 #
 # Usage: ./install.sh [options]     (see --help)
 
@@ -24,12 +25,15 @@ DOTFILES_DEFAULT_DIR="$HOME/Documents/dotfiles"
 JHQS_TARGET="$HOME/.config/quickshell/jhqs"
 BACKUP_DIR="$HOME/.config_backup_$(date +%Y%m%d_%H%M%S)"
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "$SCRIPT_DIR/Installer/packages.conf" ]]; then
-  PACKAGES_FILE="$SCRIPT_DIR/Installer/packages.conf"
+# When run as `curl … | bash` there is no script path. SCRIPT_DIR stays empty
+# and the repository is cloned on demand in main().
+SCRIPT_PATH="${BASH_SOURCE[0]:-}"
+if [[ -n "$SCRIPT_PATH" ]]; then
+  SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)"
 else
-  PACKAGES_FILE="$SCRIPT_DIR/packages.conf"
+  SCRIPT_DIR=""
 fi
+PACKAGES_FILE=""
 
 # --------------------------------------------------------------- options ---
 ASSUME_YES=false
@@ -41,6 +45,7 @@ DO_CONFIGS=true
 DO_WALLPAPERS=true
 DO_JHQS=true
 DO_SDDM=true
+DO_FISHER=true
 DO_BACKUP=true
 LINK_MODE=false
 AUTO_REBOOT=false
@@ -71,6 +76,12 @@ Fedora installer for corzyy/dotfiles + corzyy/jhqs
 
 Usage: ./install.sh [options]
 
+One-line install (clones the repo to ~/Documents/dotfiles if needed):
+
+  curl -fsSL https://raw.githubusercontent.com/corzyy/dotfiles/main/install.sh | bash
+
+Pass options after `bash -s --`, e.g. `... | bash -s -- --dry-run`.
+
 General:
   -y, --yes           skip the confirmation prompt
       --dry-run       print what would be done and change nothing
@@ -82,7 +93,7 @@ File handling:
       --no-backup     overwrite existing configs without backing them up
 
 Steps (skip with --no-<step>, run only these with --only-<step>):
-  base, terra, packages, configs, wallpapers, jhqs, sddm
+  base, terra, packages, configs, fisher, wallpapers, jhqs, sddm
 
 Reboot:
       --no-reboot     do not ask to reboot at the end
@@ -104,10 +115,22 @@ run() {
 
 run_root() { run ${SUDO[@]+"${SUDO[@]}"} "$@"; }
 
+# Read a line from the terminal so prompts still work when the script itself
+# is piped in (`curl … | bash`), where stdin is the script, not the keyboard.
+ask() {
+  local prompt="$1" reply=""
+  if [[ -r /dev/tty ]]; then
+    read -rp "$prompt" reply < /dev/tty || true
+  else
+    read -rp "$prompt" reply || true
+  fi
+  printf '%s' "$reply"
+}
+
 confirm() {
   [[ "$ASSUME_YES" == true || "$DRY_RUN" == true ]] && return 0
   local reply
-  read -rp "Continue? [Y/n] " reply || true
+  reply="$(ask "Continue? [Y/n] ")"
   [[ -z "$reply" || "$reply" =~ ^[YyJj]$ ]]
 }
 
@@ -133,17 +156,46 @@ require_fedora() {
 # Repo root: install.sh lives in the repo root, but tolerate the legacy
 # layout where it sat inside Installer/, and fall back to the clone path.
 resolve_root() {
-  if [[ -d "$SCRIPT_DIR/.config" || -d "$SCRIPT_DIR/wallpapers" ]]; then
-    printf '%s' "$SCRIPT_DIR"
-    return 0
-  fi
-  local parent
-  parent="$(dirname "$SCRIPT_DIR")"
-  if [[ -d "$parent/.config" || -d "$parent/wallpapers" ]]; then
-    printf '%s' "$parent"
-    return 0
+  if [[ -n "$SCRIPT_DIR" ]]; then
+    if [[ -d "$SCRIPT_DIR/.config" || -d "$SCRIPT_DIR/wallpapers" ]]; then
+      printf '%s' "$SCRIPT_DIR"
+      return 0
+    fi
+    local parent
+    parent="$(dirname "$SCRIPT_DIR")"
+    if [[ -d "$parent/.config" || -d "$parent/wallpapers" ]]; then
+      printf '%s' "$parent"
+      return 0
+    fi
   fi
   printf '%s' "$DOTFILES_DEFAULT_DIR"
+}
+
+packages_file_for_root() {
+  if [[ -f "$1/Installer/packages.conf" ]]; then
+    printf '%s' "$1/Installer/packages.conf"
+  else
+    printf '%s' "$1/packages.conf"
+  fi
+}
+
+# `curl … | bash`: clone the repository when no local copy is present.
+bootstrap_repo() {
+  local root="$1"
+  if [[ -d "$root/.config" || -d "$root/wallpapers" ]]; then
+    return 0
+  fi
+  if [[ "$DRY_RUN" == true ]]; then
+    printf '[dry-run] git clone %s %s\n' "$DOTFILES_REPO" "$root"
+    return 0
+  fi
+  if ! command -v git >/dev/null 2>&1; then
+    log_info "git not found — installing it first"
+    run_root "$DNF" install -y git
+  fi
+  log_info "cloning $DOTFILES_REPO into $root"
+  run mkdir -p "$(dirname "$root")"
+  run git clone "$DOTFILES_REPO" "$root"
 }
 
 # Pictures directory in the user's language (Pictures / Bilder / ...).
@@ -361,6 +413,32 @@ install_wallpapers() {
   log_ok "wallpapers done"
 }
 
+# ---------------------------------------------------------- fish plugins ---
+# Fisher (shipped with the fish config) reads ~/.config/fish/fish_plugins and
+# installs/updates every plugin listed there.
+install_fish_plugins() {
+  if ! command -v fish >/dev/null 2>&1; then
+    log_warn "fish is not installed — skipping fisher"
+    return 0
+  fi
+  if [[ ! -f "$HOME/.config/fish/functions/fisher.fish" ]]; then
+    log_info "fisher not found — installing it"
+    run fish -c 'curl -fsSL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source && fisher install jorgebucaran/fisher' \
+      || log_warn "could not install fisher — continuing"
+  fi
+  local plugins_file="$HOME/.config/fish/fish_plugins"
+  if [[ ! -f "$plugins_file" ]]; then
+    log_info "no $plugins_file — nothing to install"
+    return 0
+  fi
+  log_info "installing/updating fish plugins: $(tr '\n' ' ' < "$plugins_file")"
+  if run fish -c 'fisher update'; then
+    log_ok "fish plugins done"
+  else
+    log_warn "some fish plugins could not be installed/updated — continuing"
+  fi
+}
+
 # ----------------------------------------------------------------- jhqs ---
 install_jhqs() {
   log_info "installing jhqs: $JHQS_REPO -> $JHQS_TARGET"
@@ -472,8 +550,8 @@ prompt_reboot() {
     run_root reboot
     return 0
   fi
-  local reply=""
-  read -rp "Reboot now to finish the installation? [y/N] " reply || true
+  local reply
+  reply="$(ask "Reboot now to finish the installation? [y/N] ")"
   if [[ "$reply" =~ ^[YyJj]$ ]]; then
     log_warn "rebooting now…"
     run_root reboot
@@ -484,7 +562,7 @@ prompt_reboot() {
 
 disable_all_steps() {
   DO_BASE=false; DO_TERRA=false; DO_PACKAGES=false; DO_CONFIGS=false
-  DO_WALLPAPERS=false; DO_JHQS=false; DO_SDDM=false
+  DO_WALLPAPERS=false; DO_JHQS=false; DO_SDDM=false; DO_FISHER=false
 }
 
 # --only-<step>: on first use select just the requested step(s); additional
@@ -513,6 +591,7 @@ main() {
       --only-terra) only_step DO_TERRA ;;
       --only-packages) only_step DO_PACKAGES ;;
       --only-configs) only_step DO_CONFIGS ;;
+      --only-fisher) only_step DO_FISHER ;;
       --only-wallpapers) only_step DO_WALLPAPERS ;;
       --only-jhqs) only_step DO_JHQS ;;
       --only-sddm) only_step DO_SDDM ;;
@@ -520,6 +599,7 @@ main() {
       --no-terra) DO_TERRA=false ;;
       --no-packages) DO_PACKAGES=false ;;
       --no-configs) DO_CONFIGS=false ;;
+      --no-fisher) DO_FISHER=false ;;
       --no-wallpapers) DO_WALLPAPERS=false ;;
       --no-jhqs) DO_JHQS=false ;;
       --no-sddm) DO_SDDM=false ;;
@@ -543,11 +623,7 @@ main() {
 
   local root
   root="$(resolve_root)"
-  if [[ ! -d "$root/.config" && ! -d "$root/wallpapers" ]]; then
-    log_err "no dotfiles found in $root"
-    log_info "clone them first: git clone $DOTFILES_REPO $DOTFILES_DEFAULT_DIR"
-    exit 1
-  fi
+  PACKAGES_FILE="$(packages_file_for_root "$root")"
 
   local mode backup_state
   [[ "$LINK_MODE" == true ]] && mode="symlink" || mode="copy"
@@ -558,7 +634,7 @@ main() {
   echo "  packages : $PACKAGES_FILE"
   echo "  dnf      : $DNF"
   echo "  mode     : $mode (backup: $backup_state)"
-  echo "  steps    : base=$DO_BASE terra=$DO_TERRA packages=$DO_PACKAGES configs=$DO_CONFIGS wallpapers=$DO_WALLPAPERS jhqs=$DO_JHQS sddm=$DO_SDDM"
+  echo "  steps    : base=$DO_BASE terra=$DO_TERRA packages=$DO_PACKAGES configs=$DO_CONFIGS fisher=$DO_FISHER wallpapers=$DO_WALLPAPERS jhqs=$DO_JHQS sddm=$DO_SDDM"
   echo ""
 
   confirm || { log_info "aborted"; exit 0; }
@@ -573,10 +649,18 @@ main() {
     fi
   fi
 
+  bootstrap_repo "$root"
+  if [[ "$DRY_RUN" == true && ! -d "$root/.config" && ! -d "$root/wallpapers" ]]; then
+    log_warn "preview without a local repository — showing the clone step only"
+    DO_BASE=false; DO_TERRA=false; DO_PACKAGES=false
+    DO_CONFIGS=false; DO_FISHER=false; DO_WALLPAPERS=false
+  fi
+
   if [[ "$DO_BASE" == true ]]; then ensure_base; fi
   if [[ "$DO_TERRA" == true ]]; then ensure_terra; fi
   if [[ "$DO_PACKAGES" == true ]]; then install_packages; fi
   if [[ "$DO_CONFIGS" == true ]]; then install_configs "$root"; fi
+  if [[ "$DO_FISHER" == true ]]; then install_fish_plugins; fi
   if [[ "$DO_WALLPAPERS" == true ]]; then install_wallpapers "$root"; fi
   if [[ "$DO_JHQS" == true ]]; then install_jhqs; fi
   if [[ "$DO_SDDM" == true ]]; then ensure_sddm; fi
