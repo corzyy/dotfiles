@@ -70,9 +70,11 @@ sudo dnf install -y git && git clone https://github.com/corzyy/dotfiles.git ~/Do
 9. **jhqs** — clones/updates `corzyy/jhqs` to `~/.config/quickshell/jhqs`,
    makes `scripts/*.sh` executable, and creates
    `~/.local/bin/jhqs -> /usr/bin/quickshell` for the Mango autostart.
-10. **sddm** — enables and starts SDDM, sets `graphical.target` as the default
-    boot target (Minimal boots to `multi-user.target` otherwise), enables
+10. **sddm** — enables SDDM and sets `graphical.target` as the default boot
+    target (Minimal boots to `multi-user.target` otherwise), enables
     `NetworkManager` if needed, and checks for the `mango.desktop` session.
+    SDDM is deliberately **not** started; the installer asks to reboot at the
+    end and SDDM comes up then.
 
 At the end it prompts to reboot.
 

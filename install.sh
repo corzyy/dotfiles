@@ -15,7 +15,7 @@
 #   7. fisher     install/update the fish plugins listed in fish_plugins
 #   8. wallpapers copy wallpapers/ into the XDG Pictures directory
 #   9. jhqs       clone/update the Quickshell config and the launcher
-#  10. sddm       enable + start SDDM and default to graphical.target
+#  10. sddm       enable SDDM + set graphical.target (started on reboot)
 #
 # Usage: ./install.sh [options]     (see --help)
 
@@ -675,15 +675,10 @@ ensure_sddm() {
     fi
   fi
 
-  if systemctl is-active --quiet sddm 2>/dev/null; then
-    log_ok "SDDM already running"
-  else
-    run_root systemctl start sddm.service \
-      || log_warn "could not start SDDM now — it will start on reboot"
-  fi
-
+  # Deliberately not started here — the installer asks to reboot at the end
+  # and SDDM comes up then.
   verify_mango_session
-  log_ok "sddm done"
+  log_ok "sddm enabled and set as the default (starts on reboot)"
 }
 
 # --------------------------------------------------------------- reboot ---
