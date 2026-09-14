@@ -44,7 +44,8 @@ sudo dnf install -y git && git clone https://github.com/corzyy/dotfiles.git ~/Do
    `mangowm` and `jetbrainsmono-nerd-fonts`. Skipped if
    `/etc/yum.repos.d/terra.repo` already exists, or when
    `ENABLE_TERRA="false"`.
-3. **packages** — installs `PACKAGES` from `Installer/packages.conf`. Packages
+3. **packages** — installs `PACKAGES` from `Installer/packages.conf`. Terra is
+   enabled first if needed (so `--only-packages` works on its own). Packages
    already present are skipped, packages that no repository provides are
    reported and skipped, and `mangowm`, `quickshell` and `sddm` are verified as
    required.

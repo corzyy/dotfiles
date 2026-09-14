@@ -61,6 +61,7 @@ LINK_MODE=false
 AUTO_REBOOT=false
 NO_REBOOT_PROMPT=false
 ONLY_MODE=false
+NO_TERRA=false
 
 if [[ "$EUID" -eq 0 ]]; then
   SUDO=()
@@ -334,6 +335,11 @@ ensure_terra() {
 
 install_packages() {
   load_packages
+  # mangowm and the nerd fonts come from Terra, so make sure it is enabled
+  # before resolving/installing the package set (covers --only-packages).
+  if [[ "$NO_TERRA" == false ]]; then
+    ensure_terra
+  fi
   local pkgs=()
   dedupe_into pkgs ${PACKAGES[@]+"${PACKAGES[@]}"}
   if ((${#pkgs[@]} == 0)); then
@@ -734,7 +740,7 @@ main() {
       --only-jhqs) only_step DO_JHQS ;;
       --only-sddm) only_step DO_SDDM ;;
       --no-base) DO_BASE=false ;;
-      --no-terra) DO_TERRA=false ;;
+      --no-terra) DO_TERRA=false; NO_TERRA=true ;;
       --no-packages) DO_PACKAGES=false ;;
       --no-configs) DO_CONFIGS=false ;;
       --no-fisher) DO_FISHER=false ;;
@@ -801,7 +807,9 @@ main() {
 
   if [[ "$DO_BASE" == true ]]; then ensure_base; fi
   if [[ "$DO_CONFIGS" == true || "$DO_WALLPAPERS" == true ]]; then ensure_xdg_dirs; fi
-  if [[ "$DO_TERRA" == true ]]; then ensure_terra; fi
+  # When the package step runs it enables Terra itself (see install_packages),
+  # so only run the standalone Terra step if packages are skipped.
+  if [[ "$DO_TERRA" == true && "$DO_PACKAGES" == false ]]; then ensure_terra; fi
   if [[ "$DO_PACKAGES" == true ]]; then install_packages; fi
   if [[ "$DO_CONFIGS" == true ]]; then install_configs "$root"; fi
   if [[ "$DO_GTK" == true ]]; then apply_gtk_theme; fi
