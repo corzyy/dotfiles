@@ -172,7 +172,7 @@ resolve_root() {
 }
 
 packages_file_for_root() {
-  if [[ -f "$1/Installer/packages.conf" ]]; then
+  if [[ -f "$1/Installer/packages.conf" || ! -f "$1/packages.conf" ]]; then
     printf '%s' "$1/Installer/packages.conf"
   else
     printf '%s' "$1/packages.conf"
@@ -650,6 +650,8 @@ main() {
   fi
 
   bootstrap_repo "$root"
+  # Re-resolve now that the repository may have just been cloned.
+  PACKAGES_FILE="$(packages_file_for_root "$root")"
   if [[ "$DRY_RUN" == true && ! -d "$root/.config" && ! -d "$root/wallpapers" ]]; then
     log_warn "preview without a local repository — showing the clone step only"
     DO_BASE=false; DO_TERRA=false; DO_PACKAGES=false
