@@ -1,0 +1,71 @@
+# Window rules — ported from mango configs/rules.conf plus the opacity and blur
+# settings from configs/looknfeel.conf.
+# Documentation: https://docs.noctalia.dev/umbriel/window-rules/
+
+# Blur every window (mango blur=1). Keep this selectorless rule first so later
+# matching rules can override individual blur settings.
+[[window_rule]]
+blur = true
+
+# mango focused_opacity=1.0 / unfocused_opacity=0.95
+[[window_rule]]
+match.is_focused = false
+opacity = 0.95
+
+[[window_rule]]
+match.is_focused = true
+opacity = 1.0
+
+# About window: floating, 1100x650, centered
+# (mango: windowrule=isfloating:1,width:1100,height:650,appid:about-fastfetch)
+[[window_rule]]
+match.app_id = "^about-fastfetch$"
+default_floating = true
+default_floating_size_px = { width = 1100, height = 650 }
+default_position = { x = 0, y = 0 }
+
+# Shell update terminal: floating, 900x600, centered
+# (mango: windowrule=isfloating:1,width:900,height:600,appid:solstice-shell-update)
+[[window_rule]]
+match.app_id = "^solstice-shell-update$"
+default_floating = true
+default_floating_size_px = { width = 900, height = 600 }
+default_position = { x = 0, y = 0 }
+
+# Umbriel default kept: browsers expose no semantic PiP role, so float the
+# picture-in-picture window in the bottom-right corner.
+[[window_rule]]
+match.title = "^(Picture-in-Picture|Picture in picture)$"
+default_floating = true
+default_maximize = false
+default_position = { x = 20, y = 20, anchor = "bottom_right" }
+
+# Umbriel default kept: Steam notification toasts stay bottom-right without
+# stealing focus and stay pinned across workspace switches.
+[[window_rule]]
+match.title = "^notificationtoasts_.+_desktop"
+default_position = { x = 0, y = 0, anchor = "bottom_right" }
+default_focused = false
+default_pinned = true
+
+# Blur behind the solstice shell surfaces (bar, panels, menus, OSD) so the
+# Global > Transparency slider shows a frosted background. Layer blur is
+# opt-in per surface; blur_ignore_alpha keeps the transparent regions of the
+# full-screen panel windows (rounded corners, scrims) unblurred.
+# blur_optimized (shared cached backdrop for bar + panels) is shell-managed:
+# see the override rule in configs/shell.toml.
+[[layer_rule]]
+match.namespace = "^(bar|menu|calendar|settings|updatecenter|vitals|systemtray|launcher|networkpanel|weather|volumepanel|bluetoothpanel|controlcenterpanel|volumeosd|notifications)$"
+blur = true
+blur_popups = true
+blur_ignore_alpha = 0.3
+
+# solstice power menu (panels/PowerPanel.qml): always-blurred backdrop for the
+# Android-style centred modal. Deliberately kept out of the shell namespace
+# group above so the opaque-shell override in configs/shell.toml
+# (blur = false while the shell is opaque) never disables it.
+[[layer_rule]]
+match.namespace = "^powerpanel$"
+blur = true
+blur_popups = true
+blur_ignore_alpha = 0.3

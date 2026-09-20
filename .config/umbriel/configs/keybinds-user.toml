@@ -1,0 +1,38 @@
+# User keybinds — mirrored from mango configs/binds-user.conf.
+# Actions: https://docs.noctalia.dev/umbriel/actions/
+
+[keybinds]
+
+# --- reload (mango: reload_config) ---
+# SUPER+SHIFT+R reloads the compositor; SUPER+R reloads the shell.
+"Mod+Shift+R" = "config-reload"
+
+# --- apps ---
+"Mod+Return" = "spawn:kitty"
+"Mod+E" = "spawn:nautilus"
+"Mod+A" = "spawn:opencode"
+"Mod+B" = "spawn:helium"
+
+"Mod+Space" = "spawn:solstice module launcher toggle"
+# SUPER+ESCAPE: Android-style power menu (lock/logout/restart/shutdown).
+"Mod+Escape" = "spawn:solstice module power toggle"
+"Mod+Comma" = "spawn:solstice module settings toggle"
+"Mod+L" = "spawn:solstice lock"
+"Mod+R" = "spawn:solstice reload"
+
+# --- window close / float ---
+"Mod+W" = "window-close"
+"Mod+T" = "window-toggle-floating"
+"Alt+Q" = "window-close"
+
+# --- exit ---
+"Mod+M" = "session-quit"
+
+# --- screenshot (mango used grim+slurp; hyprshot is Hyprland-only) ---
+# solstice screenshot UI: bottom pill to switch between region / window /
+# fullscreen (scripts/screenshot.sh, saves + clipboard + notification).
+# Old direct region-to-clipboard bind, kept for reference:
+# "Print" = 'spawn:grim -g "$(slurp)" - | wl-copy -t image/png'
+"Print" = "spawn:solstice module screenshot toggle"
+"Mod+S" = "spawn:solstice module calendar toggle"
+# solstice-off: "Mod+B" = "spawn:/usr/bin/chromium-browser"

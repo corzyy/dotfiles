@@ -1,0 +1,27 @@
+# Window appearance — ported from mango configs/looknfeel.conf
+# (borderpx, border_radius, blur, blur_optimized, shadows).
+# Focused/unfocused opacity live in rules.toml as state-aware window rules.
+# Documentation: https://docs.noctalia.dev/umbriel/appearance/
+
+[appearance]
+prefer_no_csd = true
+border_width = 3        # mango: borderpx=3
+outer_border_width = 0
+corner_radius = 10      # mango: border_radius=10
+drag_opacity = 0.75
+
+[appearance.blur]
+enabled = true          # mango: blur=1
+optimized = true        # mango: blur_optimized=1 (X-ray cache)
+passes = 2              # mango blur defaults (mirrored by solstice MangoService)
+radius = 5
+noise = 0.02
+brightness = 0.9
+contrast = 0.9
+saturation = 1.2
+
+[appearance.shadow]
+enabled = false         # mango ran with shadows disabled
+softness = 10
+offset_x = 2
+offset_y = 2

@@ -1,0 +1,25 @@
+# Umbriel configuration — ported from the MangoWM setup in ~/.config/mango
+# and split into configs/ (same layout as ~/.config/mango/configs/).
+#
+# Validate: umbriel validate
+# Docs: https://docs.noctalia.dev/umbriel/
+
+[include]
+files = [
+    "configs/general.toml",
+    "configs/appearance.toml",
+    "configs/animation.toml",
+    "configs/layout.toml",
+    "configs/colors.toml",
+    "configs/input.toml",
+    "configs/outputs.toml",
+    "configs/workspaces.toml",
+    "configs/rules.toml",
+    "configs/keybinds-system.toml",
+    "configs/keybinds-user.toml",
+]
+
+# Shell-managed overrides written by the solstice settings app
+# (Appearance > Umbriel). Applied after the files above, so it wins.
+[include.optional]
+files = ["configs/shell.toml"]

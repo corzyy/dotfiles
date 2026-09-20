@@ -1,0 +1,26 @@
+# General session settings — ported from mango configs/autostart.conf and the
+# mango top-level config (~/.config/mango/config.conf).
+# Documentation: https://docs.noctalia.dev/umbriel/configuration/
+
+[general]
+# Mango: exec-once=solstice start + exec-once=wallpaper-restore.sh
+autostart = [
+    "solstice start",
+    "bash ~/.config/umbriel/wallpaper-restore.sh",
+]
+
+# Mango used Super for every bind.
+mod_key = "Super"
+xwayland = true
+
+# Mango had no startup keybind overlay.
+show_cheatsheet = false
+
+focus_on_activate = false
+honor_restored_maximize = false
+
+# mango configs/rules.conf exported SCREENSHARE_WAYLAND=1 for screen sharing
+# (Vesktop/WebRTC). XDG_CURRENT_DESKTOP is owned by Umbriel and cannot be
+# overridden here.
+[environment]
+SCREENSHARE_WAYLAND = "1"

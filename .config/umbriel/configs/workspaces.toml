@@ -1,0 +1,14 @@
+# Workspaces — ported from mango configs/workspaces.conf.
+#
+# Mango ran 10 tags per monitor (tag_num=10), all on dwindle, with tags 1-5
+# pinned (no_hide) to a specific monitor. Umbriel has no per-workspace monitor
+# pinning and no no_hide:
+#   - static workspaces (workspaces = 10 in outputs.toml) are always present on
+#     every output, which matches no_hide,
+#   - layout.mode = "dwindle" in layout.toml matches the tagrules,
+#   - workspace actions act on the output under the pointer.
+# Documentation: https://docs.noctalia.dev/umbriel/workspaces/
+
+[workspaces]
+back_and_forth = false
+empty_above = false

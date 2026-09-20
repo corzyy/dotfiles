@@ -1,0 +1,46 @@
+# Animations — ported from mango configs/looknfeel.conf
+# (animations, layer_animations, animation_type_open/close, durations).
+# Documentation: https://docs.noctalia.dev/umbriel/animation/
+
+[animation]
+enabled = true          # mango: animations=1
+duration_ms = 250
+curve = "easeout"
+
+[animation.windows_in]
+enabled = true
+duration_ms = 400
+curve = "easeout"
+style = "slide"         # mango: animation_type_open=slide
+
+[animation.windows_out]
+enabled = true
+duration_ms = 150
+curve = "easeout"
+style = "slide"         # mango: animation_type_close=slide
+
+[animation.windows_move]
+enabled = true
+duration_ms = 500
+curve = "snappy"
+
+[animation.workspaces]
+enabled = true
+duration_ms = 400       # mango: animation_duration_tag=400
+curve = "easeout"
+
+[animation.layers]
+enabled = true          # mango: layer_animations=1
+duration_ms = 250
+curve = "easeout"
+
+[animation.overview]
+enabled = true
+duration_ms = 250
+curve = "easeout"
+workspace_curve = "spring:1,1000"
+
+[animation.border]
+enabled = true
+duration_ms = 250
+curve = "easeout"

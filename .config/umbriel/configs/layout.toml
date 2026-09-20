@@ -1,0 +1,18 @@
+# Layout — ported from mango configs/looknfeel.conf (gaps, border radius) and
+# configs/workspaces.conf (every tag used layout_name:dwindle;
+# circle_layout=dwindle,scroller).
+# Documentation: https://docs.noctalia.dev/umbriel/layout/
+
+[layout]
+mode = "dwindle"                            # mango tagrule layout_name:dwindle
+gap = 10                                    # mango gappih/gappiv/gappoh/gappov=10
+extent_presets = [0.333, 0.5, 0.667]        # mango proportion preset cycle
+
+[layout.scrolling]
+default_extent_fraction = 0.5
+center_underfull_strip = true
+center_focused = "never"
+
+[layout.dwindle]
+preserve_split = false
+new_exits_fullscreen = false

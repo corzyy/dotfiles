@@ -1,0 +1,99 @@
+# System keybinds — mirrored from mango configs/binds-system.conf.
+# `Mod` is Super (see general.toml).
+# Actions: https://docs.noctalia.dev/umbriel/actions/
+
+[keybinds]
+
+# --- focus with SUPER+arrows ---
+"Mod+Left" = "window-focus-left"
+"Mod+Right" = "window-focus-right"
+"Mod+Up" = "window-focus-up"
+"Mod+Down" = "window-focus-down"
+
+# --- move windows with SUPER+SHIFT+arrows (mango exchange_client) ---
+"Mod+Shift+Left" = "column-move-left"
+"Mod+Shift+Right" = "column-move-right"
+"Mod+Shift+Up" = "window-move-up"
+"Mod+Shift+Down" = "window-move-down"
+
+# --- window state ---
+"Mod+G" = "window-toggle-pinned"                                # mango toggleglobal
+"Alt+Tab" = { action = "overview-toggle", repeat = false }       # mango togglejump
+"Alt+Backslash" = "window-toggle-floating"
+"Alt+A" = "window-toggle-maximize-to-edges"                      # mango togglemaximizescreen
+"Mod+F" = "window-toggle-maximize-to-edges"                      # mango togglemaximizescreen
+"Alt+F" = "window-toggle-fullscreen"
+"Mod+I" = "window-move-to-scratchpad"                            # mango minimized (scratchpad instead)
+"Mod+Shift+I" = "window-restore-from-scratchpad"                 # mango restore_minimized
+"Alt+Z" = "scratchpad-toggle"
+"Mod+O" = { action = "overview-toggle", repeat = false }         # mango toggleoverlay
+# mango ALT+SHIFT+F togglefakefullscreen has no Umbriel equivalent.
+
+# --- sizing (mango scroller / proportion actions) ---
+"Alt+E" = "window-set-primary-extent:1.0"                        # mango set_proportion 1.0
+"Alt+X" = "window-cycle-primary-extent"                          # mango switch_proportion_preset
+"Mod+Ctrl+Alt+Left" = "window-consume-left"                      # mango scroller_stack left
+"Mod+Ctrl+Alt+Right" = "window-consume-right"                    # mango scroller_stack right
+"Mod+Ctrl+Alt+Up" = "window-move-up"                             # mango scroller_stack up
+"Mod+Ctrl+Alt+Down" = "window-move-down"                         # mango scroller_stack down
+
+# --- layout ---
+"Mod+N" = "workspace-set-layout:toggle"                          # mango switch_layout
+
+# --- workspaces: mango tags 1-10, key 0 selects 10 ---
+"Mod+Ctrl+Left" = "workspace-move-to-output-left"                # mango tagtoleft
+"Mod+Ctrl+Right" = "workspace-move-to-output-right"              # mango tagtoright
+"Mod+1" = "workspace-switch:1"
+"Mod+2" = "workspace-switch:2"
+"Mod+3" = "workspace-switch:3"
+"Mod+4" = "workspace-switch:4"
+"Mod+5" = "workspace-switch:5"
+"Mod+6" = "workspace-switch:6"
+"Mod+7" = "workspace-switch:7"
+"Mod+8" = "workspace-switch:8"
+"Mod+9" = "workspace-switch:9"
+"Mod+0" = "workspace-switch:10"
+"Mod+Shift+1" = "window-move-to-workspace:1"
+"Mod+Shift+2" = "window-move-to-workspace:2"
+"Mod+Shift+3" = "window-move-to-workspace:3"
+"Mod+Shift+4" = "window-move-to-workspace:4"
+"Mod+Shift+5" = "window-move-to-workspace:5"
+"Mod+Shift+6" = "window-move-to-workspace:6"
+"Mod+Shift+7" = "window-move-to-workspace:7"
+"Mod+Shift+8" = "window-move-to-workspace:8"
+"Mod+Shift+9" = "window-move-to-workspace:9"
+"Mod+Shift+0" = "window-move-to-workspace:10"
+
+# --- monitor switching ---
+"Alt+Shift+Left" = "output-focus-left"                           # mango focusmon
+"Alt+Shift+Right" = "output-focus-right"
+"Mod+Alt+Left" = "window-move-to-output-left"                    # mango tagmon
+"Mod+Alt+Right" = "window-move-to-output-right"
+
+# --- resize (mango resizewin +-50px, expressed as fractions) ---
+"Ctrl+Alt+Left" = "window-modify-width-left:-0.05"
+"Ctrl+Alt+Right" = "window-modify-width-right:0.05"
+"Ctrl+Alt+Up" = "window-modify-height-up:-0.05"
+"Ctrl+Alt+Down" = "window-modify-height-down:0.05"
+# mango CTRL+SHIFT movewin (floating pixel move) has no Umbriel equivalent.
+
+# --- media keys ---
+"XF86AudioRaiseVolume" = "spawn:wpctl set-volume -l 1 @DEFAULT_AUDIO_SINK@ 5%+"
+"XF86AudioLowerVolume" = "spawn:wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
+"XF86AudioMute" = "spawn:wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+"XF86AudioMicMute" = "spawn:wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"
+"XF86MonBrightnessUp" = "spawn:brightnessctl -e4 -n2 set 5%+"
+"XF86MonBrightnessDown" = "spawn:brightnessctl -e4 -n2 set 5%-"
+"XF86AudioNext" = "spawn:playerctl next"
+"XF86AudioPlay" = "spawn:playerctl play-pause"
+"XF86AudioPause" = "spawn:playerctl play-pause"
+"XF86AudioPrev" = "spawn:playerctl previous"
+
+# --- wheel (mango axisbind) ---
+"Mod+WheelUp" = { action = "workspace-previous", cooldown_ms = 150 }
+"Mod+WheelDown" = { action = "workspace-next", cooldown_ms = 150 }
+
+# Mouse drag/resize is built into Umbriel:
+#   Mod+MouseLeft-drag  moves a tiled window or moves/resizes a floating one
+#   Mod+MouseRight-drag resizes from the nearest edge
+# This covers mango's mousebind SUPER btn_left/btn_right moveresize actions.

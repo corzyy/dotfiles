@@ -1,0 +1,22 @@
+# Matugen generated — do not edit manually
+# Source: /home/jakob/Bilder/wallpapers/monet/wallhaven-w5x65p.jpg
+# Umbriel compositor colors from the wallpaper palette (ported from the mango
+# colors.conf template). Umbriel watches its includes, so writing this file
+# applies the palette live; the post_hook reload is belt-and-braces.
+# NOTE: focus/border intentionally swapped vs matugen default --
+# focused window gets the accent (primary), unfocused gets surface_dim.
+
+[colors]
+background = "#131318"
+backdrop = "#131318"
+text_primary = "#e4e1e9"
+text_muted = "#c8c5d0"
+accent_primary = "#c1c1ff"
+accent_secondary = "#e9b9d3"
+error = "#ffb4ab"
+insert_hint = "#404178aa"
+shadow = "#0000007F"
+
+[colors.border]
+focused = "#c1c1ff"
+unfocused = "#131318"
