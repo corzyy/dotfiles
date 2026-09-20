@@ -15,8 +15,9 @@
 #   6. cursor     install + apply the bundled MacOS-Tahoe cursor
 #   7. fisher     install/update the fish plugins listed in fish_plugins
 #   8. wallpapers copy wallpapers/ into the XDG Pictures directory
-#   9. solstice   install/update the Quickshell config and the CLI launcher
-#  10. sddm       enable SDDM + set graphical.target (started on reboot)
+#   9. m3shapes   build the M3Shapes QML module solstice imports (from source)
+#  10. solstice   install/update the Quickshell config and the CLI launcher
+#  11. sddm       enable SDDM + set graphical.target (started on reboot)
 #
 # Optional applications (APP_PACKAGES) are offered interactively by the
 # packages step; --no-apps skips them.
@@ -27,8 +28,11 @@ set -euo pipefail
 
 DOTFILES_REPO="https://github.com/corzyy/dotfiles.git"
 SOLSTICE_REPO="https://github.com/corzyy/solstice.git"
+M3SHAPES_REPO="https://github.com/soramanew/m3shapes.git"
 DOTFILES_DEFAULT_DIR="$HOME/Documents/dotfiles"
 SOLSTICE_TARGET="$HOME/.config/quickshell/solstice"
+M3SHAPES_SRC="$HOME/.local/share/m3shapes"
+M3SHAPES_BUILD_DIR="$HOME/.cache/m3shapes-build"
 BACKUP_DIR="$HOME/.config_backup_$(date +%Y%m%d_%H%M%S)"
 
 # Desktop appearance defaults applied by the gtk/cursor steps.
@@ -56,6 +60,7 @@ DO_PACKAGES=true
 DO_APPS=true
 DO_CONFIGS=true
 DO_WALLPAPERS=true
+DO_M3SHAPES=true
 DO_SOLSTICE=true
 DO_SDDM=true
 DO_FISHER=true
@@ -115,7 +120,8 @@ File handling:
       --no-backup     overwrite existing configs without backing them up
 
 Steps (skip with --no-<step>, run only these with --only-<step>):
-  base, terra, packages, configs, gtk, cursor, fisher, wallpapers, solstice, sddm
+  base, terra, packages, configs, gtk, cursor, fisher, wallpapers, m3shapes,
+  solstice, sddm
 
 Reboot:
       --no-reboot     do not ask to reboot at the end
@@ -290,6 +296,7 @@ load_packages() {
   BASE_PACKAGES=()
   PACKAGES=()
   APP_PACKAGES=()
+  M3SHAPES_PACKAGES=()
   ENABLE_TERRA="true"
   # shellcheck source=/dev/null
   source "$PACKAGES_FILE"
@@ -312,6 +319,41 @@ dedupe_into() {
 
 pkg_installed() { rpm -q --quiet "$1"; }
 pkg_available() { "$DNF" list --available --quiet "$1" >/dev/null 2>&1; }
+
+# Display managers other than SDDM. When one of these is installed, SDDM is
+# neither installed nor enabled: the existing manager keeps launching the
+# Umbriel session, because /usr/share/wayland-sessions is shared.
+OTHER_DMS=(gdm lightdm lxdm ly greetd xdm)
+
+# Sets DISPLAY_MANAGER to the first installed display manager ("" if none).
+# Preferred over sddm, so a system with several DMs keeps its current one.
+DISPLAY_MANAGER=""
+detect_display_manager() {
+  local dm
+  DISPLAY_MANAGER=""
+  for dm in "${OTHER_DMS[@]}" sddm; do
+    if pkg_installed "$dm"; then
+      DISPLAY_MANAGER="$dm"
+      return 0
+    fi
+  done
+}
+
+# True when SDDM must be left alone because another DM is already installed.
+sddm_skipped() {
+  [[ -n "$DISPLAY_MANAGER" && "$DISPLAY_MANAGER" != "sddm" ]]
+}
+
+# Remove one package name from the array referenced by name.
+remove_pkg_from() {
+  local -n _arr="$1"
+  local exclude="$2" item
+  local out=()
+  for item in "${_arr[@]}"; do
+    [[ "$item" == "$exclude" ]] || out+=("$item")
+  done
+  _arr=(${out[@]+"${out[@]}"})
+}
 
 # Bail out of the run when any of these are missing afterwards: without them
 # neither the Umbriel session nor the solstice shell can start.
@@ -447,11 +489,17 @@ install_packages() {
   log_info "refreshing package metadata…"
   run_root "$DNF" makecache || log_warn "could not refresh metadata — continuing"
 
-  local required=() apps=()
+  local required=() apps=() skip_sddm=false
   dedupe_into required ${PACKAGES[@]+"${PACKAGES[@]}"}
   if ((${#required[@]} == 0)); then
     log_info "no packages configured"
     return 0
+  fi
+
+  if sddm_skipped; then
+    log_info "display manager already installed: $DISPLAY_MANAGER — skipping sddm"
+    skip_sddm=true
+    remove_pkg_from required sddm
   fi
 
   if [[ "$DO_APPS" == true ]]; then
@@ -482,13 +530,17 @@ install_packages() {
   fi
 
   # Critical packages must be present even if the metadata was stale — retry a
-  # direct install before giving up.
-  local critical
-  for critical in "${CRITICAL_PACKAGES[@]}"; do
-    if ! pkg_installed "$critical"; then
-      log_warn "required package not resolved from metadata — retrying directly: $critical"
-      if ! run_root "$DNF" install -y "$critical"; then
-        log_err "required package is missing: $critical"
+  # direct install before giving up. sddm is not critical when another DM runs.
+  local critical=() c item
+  for c in "${CRITICAL_PACKAGES[@]}"; do
+    [[ "$skip_sddm" == true && "$c" == "sddm" ]] && continue
+    critical+=("$c")
+  done
+  for item in "${critical[@]}"; do
+    if ! pkg_installed "$item"; then
+      log_warn "required package not resolved from metadata — retrying directly: $item"
+      if ! run_root "$DNF" install -y "$item"; then
+        log_err "required package is missing: $item"
         log_err "check the Terra repo, then re-run: ./install.sh --only-packages -y"
         return 1
       fi
@@ -781,6 +833,112 @@ install_fish_plugins() {
   log_ok "fish plugins done"
 }
 
+# ------------------------------------------------------------- m3shapes ---
+# solstice's bar widgets import the M3Shapes QML module
+# (github.com/soramanew/m3shapes), which no repository packages — build it
+# from source and install it system-wide so the QML engine finds it under
+# <libdir>/qt6/qml. Build dependencies come from M3SHAPES_PACKAGES.
+M3SHAPES_QML_DIR=""
+m3shapes_qml_dir() {
+  if [[ -z "$M3SHAPES_QML_DIR" ]]; then
+    M3SHAPES_QML_DIR="$(rpm --eval '%{_libdir}')/qt6/qml/M3Shapes"
+  fi
+  printf '%s' "$M3SHAPES_QML_DIR"
+}
+
+verify_m3shapes() {
+  local qml_dir lib_dir missing=() f
+  qml_dir="$(m3shapes_qml_dir)"
+  lib_dir="$(rpm --eval '%{_libdir}')"
+  local required=("$qml_dir/libm3shapesplugin.so" "$qml_dir/qmldir" "$lib_dir/libm3shapes.so")
+  for f in "${required[@]}"; do
+    [[ -e "$f" ]] || missing+=("$f")
+  done
+  if ((${#missing[@]} > 0)); then
+    log_err "m3shapes install incomplete — missing: ${missing[*]}"
+    return 1
+  fi
+  log_ok "m3shapes verified: $qml_dir"
+}
+
+ensure_m3shapes_deps() {
+  load_packages
+  local pkgs=() still=()
+  dedupe_into pkgs ${M3SHAPES_PACKAGES[@]+"${M3SHAPES_PACKAGES[@]}"}
+  if ((${#pkgs[@]} == 0)); then
+    log_warn "no M3SHAPES_PACKAGES configured — build may fail"
+    return 0
+  fi
+  install_pkg_list "m3shapes build dependencies" "${pkgs[@]}"
+  if ((${#REPLY_MISSING[@]} > 0)); then
+    log_warn "m3shapes build dependencies not available: ${REPLY_MISSING[*]}"
+  fi
+  if [[ "$DRY_RUN" == false ]]; then
+    mapfile -t still < <(missing_from "${pkgs[@]}")
+    if ((${#still[@]} > 0)); then
+      log_err "m3shapes build dependencies missing: ${still[*]}"
+      return 1
+    fi
+  fi
+}
+
+install_m3shapes() {
+  ensure_m3shapes_deps || return 1
+
+  if [[ "$DRY_RUN" == true ]]; then
+    run git clone --depth 1 "$M3SHAPES_REPO" "$M3SHAPES_SRC"
+    run cmake -S "$M3SHAPES_SRC" -B "$M3SHAPES_BUILD_DIR" -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+    run cmake --build "$M3SHAPES_BUILD_DIR"
+    run_root cmake --install "$M3SHAPES_BUILD_DIR"
+    return 0
+  fi
+
+  if ! command -v git >/dev/null 2>&1 \
+    || ! command -v cmake >/dev/null 2>&1 \
+    || ! command -v ninja >/dev/null 2>&1; then
+    log_err "git, cmake and ninja are required to build m3shapes"
+    return 1
+  fi
+
+  # User-owned checkout for updates; build out-of-tree in the cache dir.
+  if [[ -d "$M3SHAPES_SRC/.git" ]]; then
+    if [[ -n "$(git -C "$M3SHAPES_SRC" status --porcelain 2>/dev/null)" ]]; then
+      log_warn "m3shapes checkout has local changes — not pulling automatically"
+    else
+      run git -C "$M3SHAPES_SRC" pull --ff-only \
+        || log_warn "could not update m3shapes — using the existing checkout"
+    fi
+  elif [[ -e "$M3SHAPES_SRC" ]]; then
+    log_err "$M3SHAPES_SRC exists but is not a git checkout — remove it and re-run"
+    return 1
+  else
+    run git clone --depth 1 "$M3SHAPES_REPO" "$M3SHAPES_SRC"
+  fi
+
+  local head stamp qml_dir lib_dir
+  head="$(git -C "$M3SHAPES_SRC" rev-parse HEAD 2>/dev/null || true)"
+  stamp="$M3SHAPES_BUILD_DIR/.built-revision"
+  qml_dir="$(m3shapes_qml_dir)"
+  lib_dir="$(rpm --eval '%{_libdir}')"
+  if [[ -n "$head" && -f "$stamp" && "$(cat "$stamp")" == "$head" \
+    && -e "$qml_dir/libm3shapesplugin.so" && -e "$lib_dir/libm3shapes.so" ]]; then
+    log_ok "m3shapes already built at ${head:0:12}"
+    return 0
+  fi
+
+  log_info "building m3shapes ($head)…"
+  run cmake -S "$M3SHAPES_SRC" -B "$M3SHAPES_BUILD_DIR" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+  run cmake --build "$M3SHAPES_BUILD_DIR"
+  log_info "installing m3shapes system-wide (sudo)…"
+  run_root cmake --install "$M3SHAPES_BUILD_DIR"
+  mkdir -p "$M3SHAPES_BUILD_DIR"
+  printf '%s\n' "$head" > "$stamp"
+
+  verify_m3shapes
+}
+
 # ------------------------------------------------------------- solstice ---
 # solstice ships its own installer (clone, keep backend/config + snapshots,
 # atomic swap, ~/.local/bin/solstice CLI). Use it instead of a plain git
@@ -813,6 +971,10 @@ verify_solstice() {
   if ! command -v quickshell >/dev/null 2>&1 && [[ ! -x /usr/bin/quickshell ]]; then
     log_err "quickshell not found — install the packages step first"
     return 1
+  fi
+  if [[ ! -e "$(m3shapes_qml_dir)/libm3shapesplugin.so" ]]; then
+    log_warn "M3Shapes QML module not found in $(m3shapes_qml_dir) — the solstice bar needs it"
+    log_warn "run: ./install.sh --only-m3shapes -y"
   fi
   log_ok "solstice verified: $SOLSTICE_TARGET (shell.qml + solstice CLI)"
 }
@@ -915,6 +1077,11 @@ verify_umbriel_session() {
 }
 
 ensure_sddm() {
+  if sddm_skipped; then
+    log_info "display manager already installed: $DISPLAY_MANAGER — not touching SDDM"
+    verify_umbriel_session
+    return 0
+  fi
   if ! pkg_installed sddm; then
     log_err "sddm is not installed — run the packages step first"
     return 1
@@ -974,7 +1141,7 @@ prompt_reboot() {
 disable_all_steps() {
   DO_BASE=false; DO_TERRA=false; DO_PACKAGES=false; DO_CONFIGS=false
   DO_WALLPAPERS=false; DO_SOLSTICE=false; DO_SDDM=false; DO_FISHER=false
-  DO_GTK=false; DO_CURSOR=false
+  DO_GTK=false; DO_CURSOR=false; DO_M3SHAPES=false
 }
 
 # --only-<step>: on first use select just the requested step(s); additional
@@ -1009,6 +1176,7 @@ main() {
       --only-gtk) only_step DO_GTK ;;
       --only-cursor) only_step DO_CURSOR ;;
       --only-wallpapers) only_step DO_WALLPAPERS ;;
+      --only-m3shapes) only_step DO_M3SHAPES ;;
       --only-solstice) only_step DO_SOLSTICE ;;
       --only-sddm) only_step DO_SDDM ;;
       --no-base) DO_BASE=false ;;
@@ -1019,6 +1187,7 @@ main() {
       --no-gtk) DO_GTK=false ;;
       --no-cursor) DO_CURSOR=false ;;
       --no-wallpapers) DO_WALLPAPERS=false ;;
+      --no-m3shapes) DO_M3SHAPES=false ;;
       --no-solstice) DO_SOLSTICE=false ;;
       --no-sddm) DO_SDDM=false ;;
       -h|--help) usage; exit 0 ;;
@@ -1034,6 +1203,7 @@ main() {
 
   require_fedora
   DNF="$(detect_dnf)"
+  detect_display_manager
 
   if [[ "$EUID" -eq 0 ]]; then
     log_warn "running as root — user configs go to $HOME; prefer running as your normal user"
@@ -1052,18 +1222,24 @@ main() {
   echo "  dotfiles : $root"
   echo "  packages : $PACKAGES_FILE"
   echo "  dnf      : $DNF"
+  if sddm_skipped; then
+    echo "  display  : $DISPLAY_MANAGER (sddm skipped)"
+  elif [[ -n "$DISPLAY_MANAGER" ]]; then
+    echo "  display  : $DISPLAY_MANAGER"
+  fi
   echo "  mode     : $mode (backup: $backup_state)"
-  echo "  steps    : base=$DO_BASE terra=$DO_TERRA packages=$DO_PACKAGES apps=$DO_APPS configs=$DO_CONFIGS fisher=$DO_FISHER gtk=$DO_GTK cursor=$DO_CURSOR wallpapers=$DO_WALLPAPERS solstice=$DO_SOLSTICE sddm=$DO_SDDM"
+  echo "  steps    : base=$DO_BASE terra=$DO_TERRA packages=$DO_PACKAGES apps=$DO_APPS configs=$DO_CONFIGS fisher=$DO_FISHER gtk=$DO_GTK cursor=$DO_CURSOR wallpapers=$DO_WALLPAPERS m3shapes=$DO_M3SHAPES solstice=$DO_SOLSTICE sddm=$DO_SDDM"
   echo ""
 
   confirm || { log_info "aborted"; exit 0; }
 
   if [[ "$DRY_RUN" == false && "$EUID" -ne 0 \
-    && ("$DO_BASE" == true || "$DO_TERRA" == true || "$DO_PACKAGES" == true || "$DO_SDDM" == true) ]]; then
+    && ("$DO_BASE" == true || "$DO_TERRA" == true || "$DO_PACKAGES" == true \
+      || "$DO_M3SHAPES" == true || "$DO_SDDM" == true) ]]; then
     log_info "requesting sudo for the system steps…"
     if ! sudo -v; then
       log_err "sudo authentication failed"
-      log_err "skip the system steps with: --no-base --no-terra --no-packages --no-sddm"
+      log_err "skip the system steps with: --no-base --no-terra --no-packages --no-m3shapes --no-sddm"
       exit 1
     fi
   fi
@@ -1092,6 +1268,7 @@ main() {
   if [[ "$DO_CURSOR" == true ]]; then apply_cursor_theme; fi
   if [[ "$DO_FISHER" == true ]]; then install_fish_plugins; fi
   if [[ "$DO_WALLPAPERS" == true ]]; then install_wallpapers "$root"; fi
+  if [[ "$DO_M3SHAPES" == true ]]; then install_m3shapes; fi
   if [[ "$DO_SOLSTICE" == true ]]; then install_solstice; fi
   if [[ "$DO_SDDM" == true ]]; then ensure_sddm; fi
 
