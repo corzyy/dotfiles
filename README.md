@@ -16,7 +16,10 @@ curl -fsSL https://github.com/corzyy/dotfiles/raw/main/install.sh | bash
 
 `uninstall.sh` reverses every step: the solstice shell/CLI, the copied
 configs, GTK/cursor settings, fisher, wallpapers, the M3Shapes module and the
-installed packages. Backups in `~/.config_backup_*` are kept.
+installed packages. Shared system packages other desktops need (PipeWire,
+BlueZ, NetworkManager, portals, ... — see `UNINSTALL_KEEP` in
+`Installer/packages.conf`) and packages required by other installed software
+are kept. Backups in `~/.config_backup_*` are kept.
 
 ```bash
 curl -fsSL https://github.com/corzyy/dotfiles/raw/main/uninstall.sh | bash

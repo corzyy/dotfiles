@@ -14,6 +14,8 @@
 |                 | The installer asks before installing them (`--no-apps` skips). |
 | `M3SHAPES_PACKAGES` | Build deps for the M3Shapes QML module (built from source by |
 |                 | the `m3shapes` step).                                          |
+| `UNINSTALL_KEEP` | Never removed by `../uninstall.sh`: shared services other     |
+|                 | desktops rely on (PipeWire, BlueZ, NetworkManager, portals).   |
 | `ENABLE_TERRA`  | `"true"` enables Terra (umbriel-nightly, nerd fonts, helium).  |
 
 Entries are one package per line; comments and duplicates are ignored.

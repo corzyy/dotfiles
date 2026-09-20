@@ -22,10 +22,12 @@
 #                 xdg-user-dirs)
 #
 # Packages are removed by default; --keep-packages leaves every dnf package
-# untouched. Packages that other installed packages require (for example curl,
-# which rpm needs) cannot be removed and are reported as kept. The
-# ~/.config_backup_* directories created by install.sh are never deleted —
-# their location is printed at the end.
+# untouched. The uninstaller never removes UNINSTALL_KEEP packages
+# (Installer/packages.conf: PipeWire, BlueZ, NetworkManager, portals, ...) or
+# packages other installed software requires, so another desktop on the same
+# system (GNOME, KDE, sway, ...) keeps working. The ~/.config_backup_*
+# directories created by install.sh are never deleted — their location is
+# printed at the end.
 #
 # Usage: ./uninstall.sh [options]     (see --help)
 
@@ -37,6 +39,9 @@ M3SHAPES_SRC="$HOME/.local/share/m3shapes"
 M3SHAPES_BUILD_DIR="$HOME/.cache/m3shapes-build"
 
 CURSOR_THEME="MacOS-Tahoe-Cursor"
+
+# Terra repository packages install.sh adds (removed by the terra step).
+TERRA_PACKAGES=(terra-release terra-gpg-keys)
 
 # When run as `curl … | bash` there is no script path. SCRIPT_DIR stays empty
 # and the default dotfiles location is used.
@@ -109,8 +114,10 @@ Reboot:
       --no-reboot     do not ask to reboot at the end
       --reboot        reboot automatically when finished
 
-System packages are removed by default. Config backups in ~/.config_backup_*
-are left untouched.
+System packages are removed by default. UNINSTALL_KEEP packages
+(Installer/packages.conf: PipeWire, BlueZ, NetworkManager, portals, ...) and
+packages other installed software requires are never removed. Config backups
+in ~/.config_backup_* are left untouched.
 EOF
 }
 
@@ -220,9 +227,12 @@ load_packages() {
   PACKAGES=()
   APP_PACKAGES=()
   M3SHAPES_PACKAGES=()
+  UNINSTALL_KEEP=()
   ENABLE_TERRA="true"
   # shellcheck source=/dev/null
   source "$PACKAGES_FILE"
+  build_keep_set
+  compute_unremovable
 }
 
 # Fill the named array with the unique, non-comment arguments, in order.
@@ -241,6 +251,59 @@ dedupe_into() {
 }
 
 pkg_installed() { rpm -q --quiet "$1" 2>/dev/null; }
+
+# UNINSTALL_KEEP packages (shared services other desktops need) and packages
+# that another installed package requires are never removed.
+declare -A KEEP_SET=()
+declare -A REMOVABLE_CAND=()
+CANDIDATES_READY=false
+
+is_kept_pkg() { [[ -n "${KEEP_SET[$1]:-}" ]]; }
+
+build_keep_set() {
+  local p
+  KEEP_SET=()
+  for p in ${UNINSTALL_KEEP[@]+"${UNINSTALL_KEEP[@]}"}; do
+    [[ -n "$p" ]] && KEEP_SET["$p"]=1
+  done
+}
+
+# Mark every installed package from packages.conf that can safely be removed.
+# A candidate another installed package requires is dropped from the set, and
+# dropping it can in turn protect packages only it needed (fixed point), so a
+# chain like "GNOME package -> repo package -> shared library" stays intact.
+# UNINSTALL_KEEP packages block their dependencies the same way.
+compute_unremovable() {
+  local pkgs=() p d deps changed=true
+  dedupe_into pkgs \
+    ${BASE_PACKAGES[@]+"${BASE_PACKAGES[@]}"} \
+    ${PACKAGES[@]+"${PACKAGES[@]}"} \
+    ${APP_PACKAGES[@]+"${APP_PACKAGES[@]}"} \
+    ${M3SHAPES_PACKAGES[@]+"${M3SHAPES_PACKAGES[@]}"} \
+    "${TERRA_PACKAGES[@]}"
+  REMOVABLE_CAND=()
+  for p in "${pkgs[@]}"; do
+    if pkg_installed "$p" && ! is_kept_pkg "$p"; then
+      REMOVABLE_CAND["$p"]=1
+    fi
+  done
+  while [[ "$changed" == true ]]; do
+    changed=false
+    for p in "${pkgs[@]}"; do
+      [[ -n "${REMOVABLE_CAND[$p]:-}" ]] || continue
+      deps="$(rpm -q --whatrequires --qf '%{name}\n' "$p" 2>/dev/null)" || continue
+      while IFS= read -r d; do
+        [[ -n "$d" && "$d" != "$p" ]] || continue
+        if [[ -z "${REMOVABLE_CAND[$d]:-}" ]]; then
+          unset 'REMOVABLE_CAND[$p]'
+          changed=true
+          break
+        fi
+      done <<< "$deps"
+    done
+  done
+  CANDIDATES_READY=true
+}
 
 # Display managers other than SDDM. install.sh leaves SDDM alone when one of
 # these is installed, so the uninstaller does the same.
@@ -313,13 +376,14 @@ remove_root_path() {
 }
 
 # Remove the installed packages from one list, skipping names that are not
-# installed. dnf refuses to remove a package another installed package needs,
-# and one such name aborts the whole transaction, so fall back to removing
-# package by package: everything removable still goes, the rest is reported
-# as kept instead of failing the uninstall.
+# installed. UNINSTALL_KEEP packages and packages other installed software
+# needs are left alone, because dnf would either refuse the transaction or
+# silently remove the dependent packages (for example GNOME losing its
+# bluetooth panel with bluez). The removable subset is removed in one
+# transaction; anything dnf still refuses is retried package by package.
 remove_pkg_list() {
   local label="$1"; shift
-  local pkgs=("$@") installed=() p kept=()
+  local pkgs=("$@") installed=() removable=() kept=() p
   if [[ -z "$DNF" ]]; then
     log_warn "dnf/dnf5 not found — skipping removal of $label"
     return 0
@@ -334,24 +398,42 @@ remove_pkg_list() {
     return 0
   fi
 
+  for p in "${installed[@]}"; do
+    if is_kept_pkg "$p"; then
+      log_info "keeping $p (shared system/desktop package)"
+      KEPT_PACKAGES+=("$p")
+      continue
+    fi
+    if [[ "$CANDIDATES_READY" == true && -z "${REMOVABLE_CAND[$p]:-}" ]]; then
+      log_warn "keeping $p (required by other installed software)"
+      KEPT_PACKAGES+=("$p")
+      continue
+    fi
+    removable+=("$p")
+  done
+  if ((${#removable[@]} == 0)); then
+    log_ok "nothing to remove from $label"
+    return 0
+  fi
+
   if [[ "$DRY_RUN" == true ]]; then
-    log_info "removing ${#installed[@]} $label: ${installed[*]}"
-    run_root "$DNF" remove -y "${installed[@]}"
+    log_info "removing ${#removable[@]} $label: ${removable[*]}"
+    run_root "$DNF" remove -y "${removable[@]}"
     log_ok "$label removed (dry-run)"
     return 0
   fi
 
   local log
   log="$(mktemp "${TMPDIR:-/tmp}/uninstall-${label// /-}.XXXXXX.log")"
-  log_info "removing ${#installed[@]} $label…"
-  if run_root "$DNF" remove -y "${installed[@]}" >"$log" 2>&1; then
+  log_info "removing ${#removable[@]} $label…"
+  if run_root "$DNF" remove -y "${removable[@]}" >"$log" 2>&1; then
     log_ok "$label removed"
     rm -f "$log"
     return 0
   fi
 
   log_warn "dnf could not remove $label in one transaction — retrying package by package"
-  for p in "${installed[@]}"; do
+  for p in "${removable[@]}"; do
     if ! pkg_installed "$p"; then
       continue
     fi
@@ -362,7 +444,7 @@ remove_pkg_list() {
     fi
   done
   if ((${#kept[@]} > 0)); then
-    log_warn "kept (required by other installed packages): ${kept[*]}"
+    log_warn "dnf refused to remove: ${kept[*]}"
     log_warn "dnf log: $log"
     KEPT_PACKAGES+=("${kept[@]}")
   else
@@ -593,7 +675,7 @@ uninstall_packages() {
 }
 
 uninstall_terra() {
-  remove_pkg_list "Terra repository packages" terra-release terra-gpg-keys
+  remove_pkg_list "Terra repository packages" "${TERRA_PACKAGES[@]}"
   local f
   for f in /etc/yum.repos.d/terra*.repo; do
     if [[ -e "$f" ]]; then
@@ -779,7 +861,7 @@ main() {
     exit 1
   fi
   if ((${#KEPT_PACKAGES[@]} > 0)); then
-    log_warn "kept (needed by other installed packages): ${KEPT_PACKAGES[*]}"
+    log_warn "kept (shared system/desktop packages or required by other installed software): ${KEPT_PACKAGES[*]}"
   fi
   log_ok "all done — the session, configs and packages were removed"
   local b
