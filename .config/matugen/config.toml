@@ -5,16 +5,17 @@ prefer = "saturation"
 
 [templates.quickshell]
 input_path = "~/.config/matugen/templates/quickshell-colors.json"
-output_path = "~/.config/quickshell/jhqs/themes/matugen.json"
+output_path = "~/.config/quickshell/solstice/style/themes/matugen.json"
 
-[templates.hyprland]
-input_path = "~/.config/matugen/templates/hyprland-colors.lua"
-output_path = "~/.config/hypr/matugen-colors.lua"
+[templates.helium]
+input_path = "~/.config/matugen/templates/helium-theme.json"
+output_path = "~/.cache/matugen/helium-theme.json"
+post_hook = "bash ~/.config/quickshell/solstice/backend/scripts/apply-helium.sh"
 
-[templates.mango]
-input_path = "~/.config/matugen/templates/colors.conf"
-output_path = "~/.config/mango/colors.conf"
-post_hook = "mmsg dispatch reload_config >/dev/null 2>&1 || true"
+[templates.umbriel]
+input_path = "~/.config/matugen/templates/umbriel-colors.toml"
+output_path = "~/.config/umbriel/configs/colors.toml"
+post_hook = "umbriel msg config-reload >/dev/null 2>&1 || true"
 
 [templates.opencode]
 input_path = "~/.config/matugen/templates/opencode.json"
@@ -65,10 +66,6 @@ output_path = "~/.config/vesktop/themes/midnight-discord.css"
 [templates.vesktop-system24]
 input_path = "~/.config/matugen/templates/system24.css"
 output_path = "~/.config/vesktop/themes/system24.css"
-
-[templates.prismlauncher]
-input_path = "~/.config/matugen/templates/prismlauncher.json"
-output_path = "~/.local/share/PrismLauncher/themes/Matugen/theme.json"
 
 [templates.qt5ct]
 input_path = "~/.config/matugen/templates/qtct-colors.conf"

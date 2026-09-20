@@ -1,30 +1,34 @@
 #!/usr/bin/env bash
 #
-# Fedora installer for the corzyy dotfiles and the jhqs Quickshell config.
+# Fedora installer for the corzyy dotfiles and the solstice Quickshell config.
 #
 # Installs this repository's configuration on a fresh Fedora system (for
 # example the "Everything" netinstall with the Minimal profile) and brings up
-# a working MangoWM + Quickshell (jhqs) session:
+# a working Umbriel + Quickshell (solstice) session:
 #
 #   1. base       bootstrap tools missing on a minimal install
-#   2. terra      enable the Terra repository (mangowm, nerd fonts)
-#   3. packages   install the set defined in Installer/packages.conf
+#   2. terra      enable the Terra repository (umbriel, nerd fonts)
+#   3. packages   install the set defined in Installer/packages.conf and
+#                 verify every required package after installation
 #   4. configs    copy .config/* into ~/.config (with backup)
 #   5. gtk        apply adw-gtk3 to GTK applications
 #   6. cursor     install + apply the bundled MacOS-Tahoe cursor
 #   7. fisher     install/update the fish plugins listed in fish_plugins
 #   8. wallpapers copy wallpapers/ into the XDG Pictures directory
-#   9. jhqs       clone/update the Quickshell config and the launcher
+#   9. solstice   install/update the Quickshell config and the CLI launcher
 #  10. sddm       enable SDDM + set graphical.target (started on reboot)
+#
+# Optional applications (APP_PACKAGES) are offered interactively by the
+# packages step; --no-apps skips them.
 #
 # Usage: ./install.sh [options]     (see --help)
 
 set -euo pipefail
 
 DOTFILES_REPO="https://github.com/corzyy/dotfiles.git"
-JHQS_REPO="https://github.com/corzyy/jhqs.git"
+SOLSTICE_REPO="https://github.com/corzyy/solstice.git"
 DOTFILES_DEFAULT_DIR="$HOME/Documents/dotfiles"
-JHQS_TARGET="$HOME/.config/quickshell/jhqs"
+SOLSTICE_TARGET="$HOME/.config/quickshell/solstice"
 BACKUP_DIR="$HOME/.config_backup_$(date +%Y%m%d_%H%M%S)"
 
 # Desktop appearance defaults applied by the gtk/cursor steps.
@@ -49,9 +53,10 @@ DRY_RUN=false
 DO_BASE=true
 DO_TERRA=true
 DO_PACKAGES=true
+DO_APPS=true
 DO_CONFIGS=true
 DO_WALLPAPERS=true
-DO_JHQS=true
+DO_SOLSTICE=true
 DO_SDDM=true
 DO_FISHER=true
 DO_GTK=true
@@ -62,6 +67,7 @@ AUTO_REBOOT=false
 NO_REBOOT_PROMPT=false
 ONLY_MODE=false
 NO_TERRA=false
+APPS_DECIDED=false
 
 if [[ "$EUID" -eq 0 ]]; then
   SUDO=()
@@ -83,7 +89,7 @@ log_err()  { printf '%s[err ]%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; }
 
 usage() {
   cat <<'EOF'
-Fedora installer for corzyy/dotfiles + corzyy/jhqs
+Fedora installer for corzyy/dotfiles + corzyy/solstice
 
 Usage: ./install.sh [options]
 
@@ -98,17 +104,27 @@ General:
       --dry-run       print what would be done and change nothing
   -h, --help          show this help
 
+Packages:
+      --no-apps       do not install the optional APP_PACKAGES
+      --apps          install the optional APP_PACKAGES without asking
+                      (the packages step asks unless -y/--apps is given)
+
 File handling:
       --copy          copy configs into ~/.config (default)
       --link          symlink ~/.config entries to this repository
       --no-backup     overwrite existing configs without backing them up
 
 Steps (skip with --no-<step>, run only these with --only-<step>):
-  base, terra, packages, configs, gtk, cursor, fisher, wallpapers, jhqs, sddm
+  base, terra, packages, configs, gtk, cursor, fisher, wallpapers, solstice, sddm
 
 Reboot:
       --no-reboot     do not ask to reboot at the end
       --reboot        reboot automatically when finished
+
+Environment:
+  SOLSTICE_REPO   git remote to install solstice from (default: corzyy/solstice)
+  SOLSTICE_REF    branch/tag to install (default: main)
+  SOLSTICE_LOCAL  install from a local solstice checkout instead of cloning
 EOF
 }
 
@@ -273,6 +289,7 @@ load_packages() {
   fi
   BASE_PACKAGES=()
   PACKAGES=()
+  APP_PACKAGES=()
   ENABLE_TERRA="true"
   # shellcheck source=/dev/null
   source "$PACKAGES_FILE"
@@ -296,9 +313,21 @@ dedupe_into() {
 pkg_installed() { rpm -q --quiet "$1"; }
 pkg_available() { "$DNF" list --available --quiet "$1" >/dev/null 2>&1; }
 
+# Bail out of the run when any of these are missing afterwards: without them
+# neither the Umbriel session nor the solstice shell can start.
+CRITICAL_PACKAGES=(umbriel-nightly quickshell sddm)
+
+# Print the packages from the given list that are not installed, one per line.
+missing_from() {
+  local p
+  for p in "$@"; do
+    pkg_installed "$p" || printf '%s\n' "$p"
+  done
+}
+
 ensure_base() {
   load_packages
-  local pkgs=() missing=() p
+  local pkgs=() missing=() still=() p
   dedupe_into pkgs ${BASE_PACKAGES[@]+"${BASE_PACKAGES[@]}"}
   for p in ${pkgs[@]+"${pkgs[@]}"}; do
     if pkg_installed "$p"; then
@@ -313,7 +342,37 @@ ensure_base() {
   fi
   log_info "installing base tools: ${missing[*]}"
   run_root "$DNF" install -y "${missing[@]}"
-  log_ok "base tools done"
+  if [[ "$DRY_RUN" == true ]]; then
+    log_ok "base tools (dry-run)"
+    return 0
+  fi
+
+  mapfile -t still < <(missing_from "${pkgs[@]}")
+  if ((${#still[@]} > 0)); then
+    log_err "base tools still missing after install: ${still[*]}"
+    return 1
+  fi
+  log_ok "base tools done (verified ${#pkgs[@]})"
+}
+
+# Ask before installing the optional APP_PACKAGES. Skipped when the caller
+# already decided (--apps/--no-apps) or asked for a non-interactive run.
+ask_apps() {
+  local list="$1"
+  if [[ "$APPS_DECIDED" == true ]]; then return 0; fi
+  APPS_DECIDED=true
+  if [[ "$ASSUME_YES" == true ]]; then
+    log_info "installing optional apps (-y): $list"
+    return 0
+  fi
+  if [[ "$DRY_RUN" == true ]]; then
+    printf '[dry-run] prompt: install optional applications? [Y/n] (%s)\n' "$list"
+    return 0
+  fi
+  log_info "optional applications: $list"
+  local reply
+  reply="$(ask "Install these optional applications? [Y/n] ")"
+  [[ -z "$reply" || "$reply" =~ ^[YyJj]$ ]]
 }
 
 # Make dnf assume "yes" by default so any interactive invocation (and steps
@@ -334,35 +393,29 @@ ensure_terra() {
     log_ok "Terra repository already enabled"
     return 0
   fi
-  log_info "enabling the Terra repository (provides mangowm and nerd fonts)…"
+  log_info "enabling the Terra repository (provides umbriel-nightly and nerd fonts)…"
   run_root "$DNF" install -y --nogpgcheck \
     --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' \
     terra-release terra-gpg-keys
+  if [[ "$DRY_RUN" == false && ! -f /etc/yum.repos.d/terra.repo ]]; then
+    log_err "Terra repo file was not created — required packages may be unavailable"
+    return 1
+  fi
   log_ok "Terra repository enabled"
 }
 
-install_packages() {
-  load_packages
-  # mangowm and the nerd fonts come from Terra, so make sure it is enabled
-  # before resolving/installing the package set (covers --only-packages).
-  if [[ "$NO_TERRA" == false ]]; then
-    ensure_terra
-  fi
-
-  # Terra was just added: refresh metadata as root so the availability checks
-  # below (which may run unprivileged) actually see packages like mangowm.
-  log_info "refreshing package metadata…"
-  run_root "$DNF" makecache || log_warn "could not refresh metadata — continuing"
-
-  local pkgs=()
-  dedupe_into pkgs ${PACKAGES[@]+"${PACKAGES[@]}"}
+# Partition a package list into already-installed / installable / unavailable
+# and install what is missing. Sets REPLY_MISSING to the unavailable names so a
+# single unknown package (e.g. an older Fedora release) cannot abort the run.
+REPLY_MISSING=()
+install_pkg_list() {
+  local label="$1"; shift
+  local pkgs=("$@")
+  REPLY_MISSING=()
   if ((${#pkgs[@]} == 0)); then
-    log_info "no packages configured"
     return 0
   fi
 
-  # Partition into already-installed, installable and unavailable so a single
-  # unknown name (e.g. an older Fedora release) cannot abort the whole run.
   local to_install=() missing=() p
   for p in "${pkgs[@]}"; do
     if pkg_installed "$p"; then
@@ -375,18 +428,63 @@ install_packages() {
   done
 
   if ((${#to_install[@]} > 0)); then
-    log_info "installing ${#to_install[@]} packages: ${to_install[*]}"
+    log_info "installing ${#to_install[@]} $label: ${to_install[*]}"
     run_root "$DNF" install -y "${to_install[@]}"
   fi
+  REPLY_MISSING=(${missing[@]+"${missing[@]}"})
+}
 
-  if ((${#missing[@]} > 0)); then
-    log_warn "not available in the enabled repositories: ${missing[*]}"
+install_packages() {
+  load_packages
+  # umbriel-nightly and the nerd fonts come from Terra, so make sure it is
+  # enabled before resolving/installing the package set (covers --only-packages).
+  if [[ "$NO_TERRA" == false ]]; then
+    ensure_terra
   fi
 
-  # Without these the Mango session cannot come up at all. Retry a direct
-  # install first, in case the availability check missed a just-enabled repo.
+  # Terra was just added: refresh metadata as root so the availability checks
+  # below (which may run unprivileged) actually see packages like umbriel-nightly.
+  log_info "refreshing package metadata…"
+  run_root "$DNF" makecache || log_warn "could not refresh metadata — continuing"
+
+  local required=() apps=()
+  dedupe_into required ${PACKAGES[@]+"${PACKAGES[@]}"}
+  if ((${#required[@]} == 0)); then
+    log_info "no packages configured"
+    return 0
+  fi
+
+  if [[ "$DO_APPS" == true ]]; then
+    dedupe_into apps ${APP_PACKAGES[@]+"${APP_PACKAGES[@]}"}
+    if ((${#apps[@]} > 0)) && ! ask_apps "${apps[*]}"; then
+      log_info "optional applications skipped"
+      apps=()
+    fi
+  else
+    log_info "optional applications skipped (--no-apps)"
+  fi
+
+  install_pkg_list "required packages" "${required[@]}"
+  if ((${#REPLY_MISSING[@]} > 0)); then
+    log_warn "required packages not available in the enabled repositories: ${REPLY_MISSING[*]}"
+  fi
+
+  if ((${#apps[@]} > 0)); then
+    install_pkg_list "optional apps" "${apps[@]}"
+    if ((${#REPLY_MISSING[@]} > 0)); then
+      log_warn "optional apps not available in the enabled repositories: ${REPLY_MISSING[*]}"
+    fi
+  fi
+
+  if [[ "$DRY_RUN" == true ]]; then
+    log_ok "packages (dry-run)"
+    return 0
+  fi
+
+  # Critical packages must be present even if the metadata was stale — retry a
+  # direct install before giving up.
   local critical
-  for critical in mangowm quickshell sddm; do
+  for critical in "${CRITICAL_PACKAGES[@]}"; do
     if ! pkg_installed "$critical"; then
       log_warn "required package not resolved from metadata — retrying directly: $critical"
       if ! run_root "$DNF" install -y "$critical"; then
@@ -396,7 +494,23 @@ install_packages() {
       fi
     fi
   done
-  log_ok "packages done"
+
+  # Verify every required package actually landed; do not trust dnf alone.
+  local still=() summary="packages done (verified ${#required[@]} required"
+  mapfile -t still < <(missing_from "${required[@]}")
+  if ((${#still[@]} > 0)); then
+    log_err "required packages missing after install: ${still[*]}"
+    log_err "re-run after fixing the repositories: ./install.sh --only-packages -y"
+    return 1
+  fi
+  if ((${#apps[@]} > 0)); then
+    mapfile -t still < <(missing_from "${apps[@]}")
+    if ((${#still[@]} > 0)); then
+      log_warn "optional apps missing after install: ${still[*]}"
+    fi
+    summary+=", ${#apps[@]} optional"
+  fi
+  log_ok "$summary)"
 }
 
 # -------------------------------------------------------------- configs ---
@@ -440,11 +554,35 @@ install_config_entry() {
 
 make_scripts_executable() {
   local f
-  for f in "$HOME/.config/mango/wallpaper-restore.sh" "$HOME/.config/matugen/post-hook-scripts"/*.sh; do
+  for f in "$HOME/.config/umbriel/wallpaper-restore.sh" "$HOME/.config/matugen/post-hook-scripts"/*.sh; do
     if [[ -f "$f" ]]; then
       run chmod +x "$f"
     fi
   done
+}
+
+# Files the session/shell actually reads; a configs step that fails to install
+# one of these leaves solstice without colors, wallpapers or a terminal theme.
+verify_configs() {
+  local missing=() f
+  local required=(
+    ".config/umbriel/config.toml"
+    ".config/umbriel/wallpaper-restore.sh"
+    ".config/matugen/config.toml"
+    ".config/matugen/templates/quickshell-colors.json"
+    ".config/matugen/templates/umbriel-colors.toml"
+    ".config/matugen/templates/helium-theme.json"
+    ".config/kitty/kitty.conf"
+    ".config/fish/config.fish"
+  )
+  for f in "${required[@]}"; do
+    [[ -e "$HOME/$f" ]] || missing+=("$f")
+  done
+  if ((${#missing[@]} > 0)); then
+    log_err "configs missing after install: ${missing[*]}"
+    return 1
+  fi
+  log_ok "configs verified (${#required[@]} files)"
 }
 
 install_configs() {
@@ -463,6 +601,9 @@ install_configs() {
     install_config_entry "$entry" "$dest" "$name"
   done < <(find "$src" -mindepth 1 -maxdepth 1 -print0 | sort -z)
   make_scripts_executable
+  if [[ "$DRY_RUN" == false ]]; then
+    verify_configs || return 1
+  fi
   log_ok "configs done"
 }
 
@@ -515,7 +656,7 @@ write_gtk_css() {
   done
 }
 
-# Apply adw-gtk3 to GTK3 apps. On wlroots/mango there is no XSettings daemon,
+# Apply adw-gtk3 to GTK3 apps. On wlroots/umbriel there is no XSettings daemon,
 # so the theme must be set in gtk-3.0/settings.ini; gsettings alone only
 # reaches apps that go through a settings portal.
 apply_gtk_theme() {
@@ -531,15 +672,20 @@ apply_gtk_theme() {
     run gsettings set org.gnome.desktop.interface color-scheme prefer-dark \
       || log_warn "could not set color-scheme via gsettings — continuing"
   fi
+  if [[ "$DRY_RUN" == false && ! -f "$HOME/.config/gtk-3.0/settings.ini" ]]; then
+    log_err "GTK settings.ini was not written"
+    return 1
+  fi
   log_ok "GTK theme applied"
 }
 
-# Install the bundled cursor theme and make it the session default. MangoWM
-# reads the theme from looknfeel.conf; gsettings, settings.ini and the
+# Install the bundled cursor theme and make it the session default. solstice
+# reads the theme from theming_settings.json; gsettings, settings.ini and the
 # environment.d file cover GTK/Qt apps and the rest of the session.
 apply_cursor_theme() {
   local src="$REPO_ROOT/.local/share/icons/$CURSOR_THEME"
   local dest="$HOME/.local/share/icons/$CURSOR_THEME"
+  local installed=false
   if [[ -d "$src" ]]; then
     log_info "installing cursor theme: $CURSOR_THEME"
     run mkdir -p "$HOME/.local/share/icons"
@@ -548,6 +694,7 @@ apply_cursor_theme() {
     else
       run cp -a "$src" "$HOME/.local/share/icons/"
     fi
+    installed=true
   else
     log_warn "cursor theme not found in the repository: $src (skipping files)"
   fi
@@ -563,6 +710,10 @@ apply_cursor_theme() {
   write_if_changed "$HOME/.config/environment.d/cursor.conf" \
     "XCURSOR_THEME=$CURSOR_THEME
 XCURSOR_SIZE=$CURSOR_SIZE"
+  if [[ "$DRY_RUN" == false && "$installed" == true && ! -f "$dest/index.theme" ]]; then
+    log_err "cursor theme not installed: $dest/index.theme missing"
+    return 1
+  fi
   log_ok "cursor theme applied"
 }
 
@@ -588,6 +739,15 @@ install_wallpapers() {
   else
     run cp -a "$src/." "$dest/"
   fi
+  if [[ "$DRY_RUN" == false ]]; then
+    local count=0
+    count="$(find "$dest" -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) 2>/dev/null | wc -l)"
+    if ((count == 0)); then
+      log_warn "no wallpapers found in $dest after copy — the shell will show a black background"
+    else
+      log_ok "wallpapers verified ($count files)"
+    fi
+  fi
   log_ok "wallpapers done"
 }
 
@@ -610,69 +770,147 @@ install_fish_plugins() {
     return 0
   fi
   log_info "installing/updating fish plugins: $(tr '\n' ' ' < "$plugins_file")"
-  if run fish -c 'fisher update'; then
-    log_ok "fish plugins done"
-  else
+  if ! run fish -c 'fisher update'; then
     log_warn "some fish plugins could not be installed/updated — continuing"
+    return 0
+  fi
+  if [[ "$DRY_RUN" == false && ! -f "$HOME/.config/fish/functions/fisher.fish" ]]; then
+    log_err "fisher is missing after install"
+    return 1
+  fi
+  log_ok "fish plugins done"
+}
+
+# ------------------------------------------------------------- solstice ---
+# solstice ships its own installer (clone, keep backend/config + snapshots,
+# atomic swap, ~/.local/bin/solstice CLI). Use it instead of a plain git
+# checkout so updates keep the user's settings.
+#
+# The current dotfiles configs target the backend/shell/style layout. The
+# GitHub repo is cloned by default; point SOLSTICE_LOCAL at a local checkout
+# (or push it) when the repository is behind.
+verify_solstice() {
+  local missing=() f
+  local required=(
+    "shell.qml"
+    "backend/scripts/solstice"
+    "backend/services/InstanceGuard.qml"
+    "style/themes/Theme.qml"
+  )
+  for f in "${required[@]}"; do
+    [[ -e "$SOLSTICE_TARGET/$f" ]] || missing+=("$f")
+  done
+  if ((${#missing[@]} > 0)); then
+    log_err "installed solstice does not have the backend/shell/style layout (missing: ${missing[*]})"
+    log_err "the GitHub repo may be older than this dotfiles checkout — push solstice,"
+    log_err "or re-run with SOLSTICE_LOCAL=/path/to/solstice"
+    return 1
+  fi
+  if [[ ! -L "$HOME/.local/bin/solstice" && ! -x "$HOME/.local/bin/solstice" ]]; then
+    log_err "solstice CLI missing: ~/.local/bin/solstice (keybinds/autostart use it)"
+    return 1
+  fi
+  if ! command -v quickshell >/dev/null 2>&1 && [[ ! -x /usr/bin/quickshell ]]; then
+    log_err "quickshell not found — install the packages step first"
+    return 1
+  fi
+  log_ok "solstice verified: $SOLSTICE_TARGET (shell.qml + solstice CLI)"
+}
+
+# Keybinds and the Umbriel autostart call `solstice` through ~/.local/bin, so
+# refresh that symlink after both the git-checkout and installer paths.
+ensure_solstice_cli() {
+  local cli="$SOLSTICE_TARGET/backend/scripts/solstice"
+  [[ -x "$cli" ]] || return 0
+  run mkdir -p "$HOME/.local/bin"
+  if [[ -L "$HOME/.local/bin/solstice" ]]; then
+    run ln -sfn "$cli" "$HOME/.local/bin/solstice"
+  elif [[ -e "$HOME/.local/bin/solstice" ]]; then
+    log_warn "~/.local/bin/solstice exists and is not a symlink — leaving it"
+  else
+    run ln -s "$cli" "$HOME/.local/bin/solstice"
+    log_ok "created ~/.local/bin/solstice -> $cli"
   fi
 }
 
-# ----------------------------------------------------------------- jhqs ---
-install_jhqs() {
-  log_info "installing jhqs: $JHQS_REPO -> $JHQS_TARGET"
-  if [[ -d "$JHQS_TARGET/.git" ]]; then
-    if [[ -n "$(git -C "$JHQS_TARGET" status --porcelain 2>/dev/null)" ]]; then
-      log_warn "jhqs has local changes — not pulling automatically"
+install_solstice() {
+  local dest="$SOLSTICE_TARGET"
+
+  # A git checkout is the user's source of truth (possibly with local changes)
+  # and must keep its .git, so update it in place instead of swapping it out.
+  if [[ -d "$dest/.git" && -f "$dest/install.sh" ]]; then
+    log_info "existing solstice checkout: $dest"
+    if [[ -n "$(git -C "$dest" status --porcelain 2>/dev/null)" ]]; then
+      log_warn "solstice has local changes — not pulling automatically"
     else
-      run git -C "$JHQS_TARGET" pull --ff-only \
-        || log_warn "could not update jhqs — using the existing checkout"
+      run git -C "$dest" pull --ff-only \
+        || log_warn "could not update solstice — keeping the existing checkout"
     fi
-  else
-    if [[ -e "$JHQS_TARGET" ]]; then
-      if [[ "$DO_BACKUP" == true ]]; then
-        backup_path "$JHQS_TARGET"
-      else
-        run rm -rf "$JHQS_TARGET"
-      fi
+    ensure_solstice_cli
+    if [[ "$DRY_RUN" == false ]]; then
+      verify_solstice || return 1
     fi
-    run mkdir -p "$(dirname "$JHQS_TARGET")"
-    run git clone "$JHQS_REPO" "$JHQS_TARGET"
-  fi
-
-  local script
-  for script in "$JHQS_TARGET"/scripts/*.sh; do
-    if [[ -f "$script" ]]; then
-      run chmod +x "$script"
-    fi
-  done
-
-  # Mango autostart runs ~/.local/bin/jhqs, so provide that launcher.
-  local qs_bin
-  qs_bin="$(command -v quickshell || true)"
-  if [[ -z "$qs_bin" && -x /usr/bin/quickshell ]]; then
-    qs_bin="/usr/bin/quickshell"
-  fi
-  if [[ -z "$qs_bin" ]]; then
-    log_warn "quickshell not found — install packages first; launcher skipped"
     return 0
   fi
-  run mkdir -p "$HOME/.local/bin"
-  if [[ -e "$HOME/.local/bin/jhqs" || -L "$HOME/.local/bin/jhqs" ]]; then
-    log_ok "launcher already present: ~/.local/bin/jhqs"
-  else
-    run ln -s "$qs_bin" "$HOME/.local/bin/jhqs"
-    log_ok "created ~/.local/bin/jhqs -> $qs_bin"
+
+  if ! command -v git >/dev/null 2>&1; then
+    log_err "git is required to install solstice"
+    return 1
   fi
-  log_ok "jhqs done"
+
+  # Staging source, cleaned up on script exit.
+  SOLSTICE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/solstice-src.XXXXXX")"
+  trap 'rm -rf "${SOLSTICE_TMP:-}"' EXIT
+  local src="$SOLSTICE_TMP"
+
+  if [[ -n "${SOLSTICE_LOCAL:-}" ]]; then
+    if [[ "$DRY_RUN" == true ]]; then
+      printf '[dry-run] copy %s (without .git) and run: bash <tmp>/install.sh -y --no-start\n' "$SOLSTICE_LOCAL"
+      return 0
+    fi
+    if [[ ! -f "$SOLSTICE_LOCAL/shell.qml" || ! -f "$SOLSTICE_LOCAL/install.sh" ]]; then
+      log_err "SOLSTICE_LOCAL=$SOLSTICE_LOCAL is not a solstice checkout"
+      return 1
+    fi
+    log_info "installing solstice from local checkout: $SOLSTICE_LOCAL"
+    if command -v rsync >/dev/null 2>&1; then
+      rsync -a --exclude .git "$SOLSTICE_LOCAL/" "$src/" || return 1
+    else
+      cp -a "$SOLSTICE_LOCAL/." "$src/" && rm -rf "$src/.git"
+    fi
+  else
+    local ref="${SOLSTICE_REF:-main}"
+    if [[ "$DRY_RUN" == true ]]; then
+      printf '[dry-run] git clone --depth 1 --branch %s %s <tmp> && bash <tmp>/install.sh -y --no-start\n' "$ref" "$SOLSTICE_REPO"
+      return 0
+    fi
+    log_info "cloning $SOLSTICE_REPO ($ref)"
+    if ! git clone --depth 1 --branch "$ref" "$SOLSTICE_REPO" "$src" >/dev/null 2>&1; then
+      log_err "could not clone solstice — check the network and $SOLSTICE_REPO"
+      return 1
+    fi
+    if [[ ! -f "$src/shell.qml" || ! -f "$src/install.sh" ]]; then
+      log_err "solstice checkout looks invalid (shell.qml/install.sh missing)"
+      return 1
+    fi
+  fi
+
+  log_info "installing solstice (keeping backend/config and theme snapshots)…"
+  if ! SOLSTICE_SRC="$src" bash "$src/install.sh" -y --no-start; then
+    log_err "solstice installer failed"
+    return 1
+  fi
+  ensure_solstice_cli
+  verify_solstice
 }
 
 # ----------------------------------------------------------------- sddm ---
-verify_mango_session() {
-  local sessions=(/usr/share/wayland-sessions/*mango*.desktop)
+verify_umbriel_session() {
+  local sessions=(/usr/share/wayland-sessions/*umbriel*.desktop)
   if [[ -e "${sessions[0]}" ]]; then
-    log_ok "mango session found: $(basename "${sessions[0]}")"
+    log_ok "umbriel session found: $(basename "${sessions[0]}")"
   else
-    log_warn "no mango session in /usr/share/wayland-sessions — install mangowm first"
+    log_warn "no umbriel session in /usr/share/wayland-sessions — install umbriel-nightly first"
   fi
 }
 
@@ -681,8 +919,8 @@ ensure_sddm() {
     log_err "sddm is not installed — run the packages step first"
     return 1
   fi
-  if ! pkg_installed mangowm; then
-    log_warn "mangowm is not installed — SDDM will have no mango session yet"
+  if ! pkg_installed umbriel-nightly; then
+    log_warn "umbriel-nightly is not installed — SDDM will have no Umbriel session yet"
   fi
 
   log_info "enabling SDDM…"
@@ -704,7 +942,7 @@ ensure_sddm() {
 
   # Deliberately not started here — the installer asks to reboot at the end
   # and SDDM comes up then.
-  verify_mango_session
+  verify_umbriel_session
   log_ok "sddm enabled and set as the default (starts on reboot)"
 }
 
@@ -729,13 +967,13 @@ prompt_reboot() {
     log_warn "rebooting now…"
     run_root reboot
   else
-    log_info "reboot skipped — reboot manually to reach the Mango session"
+    log_info "reboot skipped — reboot manually to reach the Umbriel session"
   fi
 }
 
 disable_all_steps() {
   DO_BASE=false; DO_TERRA=false; DO_PACKAGES=false; DO_CONFIGS=false
-  DO_WALLPAPERS=false; DO_JHQS=false; DO_SDDM=false; DO_FISHER=false
+  DO_WALLPAPERS=false; DO_SOLSTICE=false; DO_SDDM=false; DO_FISHER=false
   DO_GTK=false; DO_CURSOR=false
 }
 
@@ -761,6 +999,8 @@ main() {
       --no-backup) DO_BACKUP=false ;;
       --no-reboot) NO_REBOOT_PROMPT=true ;;
       --reboot) AUTO_REBOOT=true; NO_REBOOT_PROMPT=false ;;
+      --apps) DO_APPS=true; APPS_DECIDED=true ;;
+      --no-apps) DO_APPS=false; APPS_DECIDED=true ;;
       --only-base) only_step DO_BASE ;;
       --only-terra) only_step DO_TERRA ;;
       --only-packages) only_step DO_PACKAGES ;;
@@ -769,7 +1009,7 @@ main() {
       --only-gtk) only_step DO_GTK ;;
       --only-cursor) only_step DO_CURSOR ;;
       --only-wallpapers) only_step DO_WALLPAPERS ;;
-      --only-jhqs) only_step DO_JHQS ;;
+      --only-solstice) only_step DO_SOLSTICE ;;
       --only-sddm) only_step DO_SDDM ;;
       --no-base) DO_BASE=false ;;
       --no-terra) DO_TERRA=false; NO_TERRA=true ;;
@@ -779,7 +1019,7 @@ main() {
       --no-gtk) DO_GTK=false ;;
       --no-cursor) DO_CURSOR=false ;;
       --no-wallpapers) DO_WALLPAPERS=false ;;
-      --no-jhqs) DO_JHQS=false ;;
+      --no-solstice) DO_SOLSTICE=false ;;
       --no-sddm) DO_SDDM=false ;;
       -h|--help) usage; exit 0 ;;
       *)
@@ -813,7 +1053,7 @@ main() {
   echo "  packages : $PACKAGES_FILE"
   echo "  dnf      : $DNF"
   echo "  mode     : $mode (backup: $backup_state)"
-  echo "  steps    : base=$DO_BASE terra=$DO_TERRA packages=$DO_PACKAGES configs=$DO_CONFIGS fisher=$DO_FISHER gtk=$DO_GTK cursor=$DO_CURSOR wallpapers=$DO_WALLPAPERS jhqs=$DO_JHQS sddm=$DO_SDDM"
+  echo "  steps    : base=$DO_BASE terra=$DO_TERRA packages=$DO_PACKAGES apps=$DO_APPS configs=$DO_CONFIGS fisher=$DO_FISHER gtk=$DO_GTK cursor=$DO_CURSOR wallpapers=$DO_WALLPAPERS solstice=$DO_SOLSTICE sddm=$DO_SDDM"
   echo ""
 
   confirm || { log_info "aborted"; exit 0; }
@@ -852,11 +1092,12 @@ main() {
   if [[ "$DO_CURSOR" == true ]]; then apply_cursor_theme; fi
   if [[ "$DO_FISHER" == true ]]; then install_fish_plugins; fi
   if [[ "$DO_WALLPAPERS" == true ]]; then install_wallpapers "$root"; fi
-  if [[ "$DO_JHQS" == true ]]; then install_jhqs; fi
+  if [[ "$DO_SOLSTICE" == true ]]; then install_solstice; fi
   if [[ "$DO_SDDM" == true ]]; then ensure_sddm; fi
 
   echo ""
-  log_ok "all done — log in to the Mango session, then run: qs -c jhqs ipc call jhqs reload"
+  log_ok "all done — reboot, log in to the Umbriel session; solstice starts automatically"
+  log_info "manage the shell with: solstice start | solstice reload | solstice lock"
   if [[ "$DO_BACKUP" == true && -d "$BACKUP_DIR" ]]; then
     log_info "backups (if any) are in: $BACKUP_DIR"
   fi

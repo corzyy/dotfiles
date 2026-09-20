@@ -1,7 +1,7 @@
 #!/bin/bash
 # Restores wallpaper on Umbriel startup (ported from the mango autostart).
 # solstice also re-spawns swaybg itself if it dies, so this is just first-paint.
-WALL=$(cat ~/.config/quickshell/solstice/config/current_wallpaper.txt 2>/dev/null | tr -d "\r\n")
+WALL=$(cat ~/.config/quickshell/solstice/backend/config/current_wallpaper.txt 2>/dev/null | tr -d "\r\n")
 [ -f "$WALL" ] || WALL=$(cat ~/.cache/swaybg/current 2>/dev/null | tr -d "\r\n")
 if [ ! -f "$WALL" ]; then
   for d in "$HOME/Pictures/wallpapers" "$HOME/Bilder/wallpapers" "$HOME/Wallpapers" "$HOME/wallpapers"; do
@@ -12,7 +12,7 @@ if [ ! -f "$WALL" ]; then
   done
 fi
 [ -f "$WALL" ] || exit 0
-MODE=$(jq -r '.mode // "fill"' ~/.config/quickshell/solstice/config/wallpaper_settings.json 2>/dev/null)
+MODE=$(jq -r '.mode // "fill"' ~/.config/quickshell/solstice/backend/config/wallpaper_settings.json 2>/dev/null)
 case "$MODE" in
   stretch|fit|fill|center|tile) ;;
   *) MODE=fill ;;

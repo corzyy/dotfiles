@@ -1,0 +1,4 @@
+{
+  "mode": "{{mode}}",
+  "seed": "{{colors.source_color.default.hex}}"
+}

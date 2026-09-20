@@ -1,0 +1,22 @@
+# Matugen generated — do not edit manually
+# Source: {{image}}
+# Umbriel compositor colors from the wallpaper palette (ported from the mango
+# colors.conf template). Umbriel watches its includes, so writing this file
+# applies the palette live; the post_hook reload is belt-and-braces.
+# NOTE: focus/border intentionally swapped vs matugen default --
+# focused window gets the accent (primary), unfocused gets surface_dim.
+
+[colors]
+background = "{{colors.background.default.hex}}"
+backdrop = "{{colors.background.default.hex}}"
+text_primary = "{{colors.on_background.default.hex}}"
+text_muted = "{{colors.on_surface_variant.default.hex}}"
+accent_primary = "{{colors.primary.default.hex}}"
+accent_secondary = "{{colors.tertiary.default.hex}}"
+error = "{{colors.error.default.hex}}"
+insert_hint = "{{colors.primary_container.default.hex}}aa"
+shadow = "#0000007F"
+
+[colors.border]
+focused = "{{colors.primary.default.hex}}"
+unfocused = "{{colors.surface_dim.default.hex}}"
