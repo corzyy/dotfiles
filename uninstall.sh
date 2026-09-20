@@ -22,8 +22,10 @@
 #                 xdg-user-dirs)
 #
 # Packages are removed by default; --keep-packages leaves every dnf package
-# untouched. The ~/.config_backup_* directories created by install.sh are
-# never deleted — their location is printed at the end.
+# untouched. Packages that other installed packages require (for example curl,
+# which rpm needs) cannot be removed and are reported as kept. The
+# ~/.config_backup_* directories created by install.sh are never deleted —
+# their location is printed at the end.
 #
 # Usage: ./uninstall.sh [options]     (see --help)
 
@@ -273,6 +275,7 @@ remove_pkg_from() {
 
 # ------------------------------------------------------------ removal ---
 FAILURES=()
+KEPT_PACKAGES=()
 fail_step() {
   FAILURES+=("$1")
   log_warn "$1"
@@ -310,10 +313,13 @@ remove_root_path() {
 }
 
 # Remove the installed packages from one list, skipping names that are not
-# installed. A failed dnf run is recorded and does not abort the uninstall.
+# installed. dnf refuses to remove a package another installed package needs,
+# and one such name aborts the whole transaction, so fall back to removing
+# package by package: everything removable still goes, the rest is reported
+# as kept instead of failing the uninstall.
 remove_pkg_list() {
   local label="$1"; shift
-  local pkgs=("$@") installed=() p
+  local pkgs=("$@") installed=() p kept=()
   if [[ -z "$DNF" ]]; then
     log_warn "dnf/dnf5 not found — skipping removal of $label"
     return 0
@@ -327,12 +333,42 @@ remove_pkg_list() {
     log_ok "no $label installed"
     return 0
   fi
-  log_info "removing ${#installed[@]} $label: ${installed[*]}"
-  if ! run_root "$DNF" remove -y "${installed[@]}"; then
-    fail_step "could not remove $label"
+
+  if [[ "$DRY_RUN" == true ]]; then
+    log_info "removing ${#installed[@]} $label: ${installed[*]}"
+    run_root "$DNF" remove -y "${installed[@]}"
+    log_ok "$label removed (dry-run)"
     return 0
   fi
-  log_ok "$label removed"
+
+  local log
+  log="$(mktemp "${TMPDIR:-/tmp}/uninstall-${label// /-}.XXXXXX.log")"
+  log_info "removing ${#installed[@]} $label…"
+  if run_root "$DNF" remove -y "${installed[@]}" >"$log" 2>&1; then
+    log_ok "$label removed"
+    rm -f "$log"
+    return 0
+  fi
+
+  log_warn "dnf could not remove $label in one transaction — retrying package by package"
+  for p in "${installed[@]}"; do
+    if ! pkg_installed "$p"; then
+      continue
+    fi
+    if run_root "$DNF" remove -y "$p" >>"$log" 2>&1; then
+      log_ok "removed: $p"
+    else
+      kept+=("$p")
+    fi
+  done
+  if ((${#kept[@]} > 0)); then
+    log_warn "kept (required by other installed packages): ${kept[*]}"
+    log_warn "dnf log: $log"
+    KEPT_PACKAGES+=("${kept[@]}")
+  else
+    rm -f "$log"
+    log_ok "$label removed"
+  fi
 }
 
 # --------------------------------------------------------------- steps ---
@@ -741,6 +777,9 @@ main() {
   if ((${#FAILURES[@]} > 0)); then
     log_err "some steps failed: ${FAILURES[*]}"
     exit 1
+  fi
+  if ((${#KEPT_PACKAGES[@]} > 0)); then
+    log_warn "kept (needed by other installed packages): ${KEPT_PACKAGES[*]}"
   fi
   log_ok "all done — the session, configs and packages were removed"
   local b
