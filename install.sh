@@ -861,6 +861,64 @@ verify_m3shapes() {
   log_ok "m3shapes verified: $qml_dir"
 }
 
+# Fedora package that ships a CMake package config, so a failed configure can
+# name the package to install instead of only CMake's "Missing: X_DIR".
+cmake_dir_package() {
+  case "$1" in
+    Qt6Core_DIR | Qt6Gui_DIR) printf 'qt6-qtbase-devel' ;;
+    Qt6Qml_DIR | Qt6Quick_DIR) printf 'qt6-qtdeclarative-devel' ;;
+    Qt6ShaderTools_DIR) printf 'qt6-qtshadertools-devel' ;;
+    *) printf '' ;;
+  esac
+}
+
+# Extract the CMake package dirs a failed configure could not find, across the
+# error shapes CMake/Qt use: "(missing: Qt6ShaderTools_DIR)", "Failed to find
+# Qt component "ShaderTools"" and ".../Qt6ShaderToolsConfig.cmake does not
+# exist".
+m3shapes_missing_dirs() {
+  local log="$1"
+  {
+    grep -oiE 'missing: [A-Za-z0-9_]+_DIR' "$log" 2>/dev/null | cut -d' ' -f2
+    grep -oE 'Qt component "[A-Za-z0-9]+"' "$log" 2>/dev/null \
+      | sed -E 's/Qt component "([A-Za-z0-9]+)"/Qt6\1_DIR/'
+    grep -oE 'Qt6[A-Za-z0-9]+Config\.cmake' "$log" 2>/dev/null | sed 's/Config\.cmake/_DIR/'
+  } | sort -u
+}
+
+# Configure the m3shapes build, mapping a missing CMake package to its Fedora
+# package. Output goes to a log so the error path can point at the cause.
+configure_m3shapes() {
+  local log="$M3SHAPES_BUILD_DIR/configure.log"
+  if [[ "$DRY_RUN" == true ]]; then
+    run cmake -S "$M3SHAPES_SRC" -B "$M3SHAPES_BUILD_DIR" -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+    return 0
+  fi
+  run mkdir -p "$M3SHAPES_BUILD_DIR"
+  if cmake -S "$M3SHAPES_SRC" -B "$M3SHAPES_BUILD_DIR" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr >"$log" 2>&1; then
+    return 0
+  fi
+
+  log_err "m3shapes cmake configure failed (log: $log)"
+  local dir pkg found=false
+  while IFS= read -r dir; do
+    pkg="$(cmake_dir_package "$dir")"
+    if [[ -n "$pkg" ]]; then
+      log_err "missing $dir — Fedora package: $pkg"
+      log_err "install it and re-run: ./install.sh --only-m3shapes -y"
+      found=true
+      break
+    fi
+  done < <(m3shapes_missing_dirs "$log")
+  if [[ "$found" == false ]]; then
+    grep -iE 'CMake Error|missing:' "$log" 2>/dev/null | head -5 >&2 || true
+    log_err "see the full log: $log"
+  fi
+  return 1
+}
+
 ensure_m3shapes_deps() {
   load_packages
   local pkgs=() still=()
@@ -887,8 +945,7 @@ install_m3shapes() {
 
   if [[ "$DRY_RUN" == true ]]; then
     run git clone --depth 1 "$M3SHAPES_REPO" "$M3SHAPES_SRC"
-    run cmake -S "$M3SHAPES_SRC" -B "$M3SHAPES_BUILD_DIR" -G Ninja \
-      -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+    configure_m3shapes
     run cmake --build "$M3SHAPES_BUILD_DIR"
     run_root cmake --install "$M3SHAPES_BUILD_DIR"
     return 0
@@ -928,8 +985,7 @@ install_m3shapes() {
   fi
 
   log_info "building m3shapes ($head)…"
-  run cmake -S "$M3SHAPES_SRC" -B "$M3SHAPES_BUILD_DIR" -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+  configure_m3shapes || return 1
   run cmake --build "$M3SHAPES_BUILD_DIR"
   log_info "installing m3shapes system-wide (sudo)…"
   run_root cmake --install "$M3SHAPES_BUILD_DIR"
